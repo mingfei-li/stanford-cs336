@@ -2,10 +2,33 @@ import os
 from typing import BinaryIO
 
 def find_chunk_boundaries(
-    file: BinaryIO, 
+    input_path: str | os.PathLike, 
     chunk_size: int, 
-    split_special_token: bytes
+    split_special_token: bytes,
 ) -> list[int]:
+
+    """
+    Helper function that finds the first split_special_token 
+    at or after a strat_pos.
+    """
+    def find_boundary_in_chunk(
+        start_pos: int,
+    ) -> int:
+        mini_chunk_size = 4096
+        with open(input_path, "rb") as file:
+            file.seek(start_pos)
+            while True:
+                mini_chunk = file.read(mini_chunk_size)
+                if mini_chunk == b"":
+                    break
+                found_at = mini_chunk.find(split_special_token)
+                if found_at != -1:
+                    return start_pos + found_at
+                start_pos += mini_chunk_size
+
+            # If no boundary is found, return file size
+            return file.tell()
+
     """
     Chunk the file into parts that can be counted independently.
     May return fewer chunks if the boundaries end up overlapping.
@@ -14,10 +37,10 @@ def find_chunk_boundaries(
         "Must represent special token as a bytestring"
     )
 
-    # Get total file size in bytes
-    file.seek(0, os.SEEK_END)
-    file_size = file.tell()
-    file.seek(0)
+    with open(input_path, "rb") as file:
+        # Get total file size in bytes
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
 
     desired_num_chunks = file_size // chunk_size
 
@@ -25,26 +48,7 @@ def find_chunk_boundaries(
     # Chunks start on previous index, don't include last index
     chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
     chunk_boundaries[-1] = file_size
-
-    mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
-
-    for bi in range(1, len(chunk_boundaries) - 1):
-        initial_position = chunk_boundaries[bi]
-        file.seek(initial_position)  # Start at boundary guess
-        while True:
-            mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
-
-            # If EOF, this boundary should be at the end of the file
-            if mini_chunk == b"":
-                chunk_boundaries[bi] = file_size
-                break
-
-            # Find the special token in the mini chunk
-            found_at = mini_chunk.find(split_special_token)
-            if found_at != -1:
-                chunk_boundaries[bi] = initial_position + found_at
-                break
-            initial_position += mini_chunk_size
+    chunk_boundaries[1:-1] = map(find_boundary_in_chunk, chunk_boundaries[1:-1])
 
     # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
     return sorted(set(chunk_boundaries))
@@ -57,7 +61,7 @@ def train_bpe(
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
     with open(input_path, "rb") as f:
         boundaries = find_chunk_boundaries(
-            f, 1_000_000, "<|endoftext|>".encode("utf-8"))
+            input_path, 1_000_000, "<|endoftext|>".encode("utf-8"))
             
         print(boundaries)
         # The following is a serial implementation, but you can parallelize this 
