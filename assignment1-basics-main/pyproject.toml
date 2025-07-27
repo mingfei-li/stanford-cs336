@@ -19,6 +19,7 @@ dependencies = [
     "tqdm>=4.67.1",
     "wandb>=0.19.7",
     "ipykernel>=6.30.0",
+    "scalene>=1.5.51",
 ]
 
 
