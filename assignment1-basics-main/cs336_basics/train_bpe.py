@@ -1,42 +1,26 @@
-import time
+import json
 import os
 import regex as re
+import sys
+import time
 from collections import Counter
 from collections import defaultdict
 from functools import partial
-from multiprocessing import Pool
+from multiprocessing import Pool, cpu_count
 from typing import BinaryIO
 
+from tests.common import gpt2_bytes_to_unicode
+
 PRETOKENIZER_PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
+GPT2_BYTES_TO_UNICODE = gpt2_bytes_to_unicode()
 
-"""
-Helper function that finds the first split_special_token 
-at or after a strat_pos.
-"""
-def find_boundary_in_chunk(
-    input_path: str | os.PathLike, 
-    split_special_token: bytes,
-    start_pos: int,
-) -> int:
-    mini_chunk_size = 4096
-    with open(input_path, "rb") as file:
-        file.seek(start_pos)
-        while True:
-            mini_chunk = file.read(mini_chunk_size)
-            if mini_chunk == b"":
-                break
-            found_at = mini_chunk.find(split_special_token)
-            if found_at != -1:
-                return start_pos + found_at
-            start_pos += mini_chunk_size
-
-        # If no boundary is found, return file size
-        return file.tell()
+def get_printable(token: bytes):
+    return "".join(GPT2_BYTES_TO_UNICODE[byte] for byte in token)
 
 def find_chunk_boundaries(
-    input_path: str | os.PathLike, 
-    chunk_size: int, 
-    split_special_token: bytes,
+    input_path: str | os.PathLike,
+    desired_num_chunks: int, 
+    split_special_token: bytes
 ) -> list[int]:
     """
     Chunk the file into parts that can be counted independently.
@@ -50,23 +34,37 @@ def find_chunk_boundaries(
         # Get total file size in bytes
         file.seek(0, os.SEEK_END)
         file_size = file.tell()
+        file.seek(0)
 
-    desired_num_chunks = file_size // chunk_size
-    if file_size % chunk_size != 0:
-        desired_num_chunks += 1
+        chunk_size = file_size // desired_num_chunks
 
-    # Initial guesses for chunk boundary locations, uniformly spaced
-    # Chunks start on previous index, don't include last index
-    chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
-    chunk_boundaries[-1] = file_size
-    #with Pool() as p:
-    chunk_boundaries[1:-1] = map(
-        partial(find_boundary_in_chunk, input_path, split_special_token),
-        chunk_boundaries[1:-1],
-    )
+        # Initial guesses for chunk boundary locations, uniformly spaced
+        # Chunks start on previous index, don't include last index
+        chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
+        chunk_boundaries[-1] = file_size
 
-    # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
-    return sorted(set(chunk_boundaries))
+        mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
+        for bi in range(1, len(chunk_boundaries) - 1):
+            initial_position = chunk_boundaries[bi]
+            file.seek(initial_position)  # Start at boundary guess
+            while True:
+                mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+                # If EOF, this boundary should be at the end of the file
+                if mini_chunk == b"":
+                    chunk_boundaries[bi] = file_size
+                    break
+
+                # Find the special token in the mini chunk
+                found_at = mini_chunk.find(split_special_token)
+                if found_at != -1:
+                    chunk_boundaries[bi] = initial_position + found_at
+                    break
+                initial_position += mini_chunk_size
+
+        # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
+        return sorted(set(chunk_boundaries))
 
 def pretokenize_chunk(
     input_path: str | os.PathLike,
@@ -81,35 +79,9 @@ def pretokenize_chunk(
     documents = re.split("|".join(escaped_special_tokens), chunk)
     pretoken_counts = defaultdict(int)
     for doc in documents:
-        for pretoken in re.findall(PRETOKENIZER_PAT, doc):
-            pretoken_counts[pretoken] += 1
+        for match in re.finditer(PRETOKENIZER_PAT, doc):
+            pretoken_counts[match.group()] += 1
     return pretoken_counts
-
-def count_token_pairs(
-    pretoken_counts: tuple[bytes],
-) -> dict[tuple[bytes, bytes], int]:
-    pretoken, multiplier = pretoken_counts
-    pair_counts = defaultdict(int)
-    for token_1, token_2 in zip(pretoken[:-1], pretoken[1:]):
-       pair_counts[(token_1, token_2)] += multiplier
-    return pair_counts
-
-def apply_merge(
-    merge: tuple[bytes, bytes],
-    pretoken,
-) -> Counter[tuple[bytes]]:
-    new_pretoken = []
-    i = 0
-    merged_token = merge[0] + merge[1]
-    n = len(pretoken)
-    while i < n:
-        if i+1 < n and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
-            new_pretoken.append(merged_token)
-            i += 2
-        else:
-            new_pretoken.append(pretoken[i])
-            i += 1
-    return tuple(new_pretoken)
 
 def pretokenize(
     input_path: str | os.PathLike,
@@ -117,7 +89,7 @@ def pretokenize(
 ) -> tuple[list[tuple[bytes]], list[int]]:
     with Pool() as p:
         boundaries = find_chunk_boundaries(
-            input_path, 1000_000, "<|endoftext|>".encode("utf-8"))
+            input_path, cpu_count(), "<|endoftext|>".encode("utf-8"))
     
         pretoken_counts_by_chunk = p.map(
             partial(pretokenize_chunk, input_path, special_tokens),
@@ -127,9 +99,10 @@ def pretokenize(
         for chunk_pretoken_counts in pretoken_counts_by_chunk:
             for pretoken, count in chunk_pretoken_counts.items():
                 pretoken_counts[pretoken] += count
+        
         pretokens = [
             tuple(bytes([byte]) for byte in pretoken.encode("utf-8"))
-            for pretoken in pretoken_counts.keys()
+            for pretoken in pretoken_counts
         ]
         return pretokens, pretoken_counts.values()
 
@@ -145,55 +118,61 @@ def train_bpe(
         for token_1, token_2 in zip(pretoken[:-1], pretoken[1:]):
             pair_counts[(token_1, token_2)] += count
 
-    token_set = (
-        set(token for pretoken in pretokens for token in pretoken)
-        | set(token.encode("utf-8") for token in special_tokens)
+    token_list = (
+        [token.encode("utf-8") for token in special_tokens]
+        + [bytes([byte]) for byte in range(256)]
     )
+    token_set = set(token_list)
     merges = []
 
-    while len(token_set) < vocab_size:
+    while len(token_list) < vocab_size:
         merge, _ = max(pair_counts.items(), key=lambda x: (x[1], x[0]))
-        merges.append(merge)
         merged_token = merge[0]+merge[1]
+        merges.append(merge)
+        token_list.append(merged_token)
         token_set.add(merged_token)
 
         new_pretokens = []
         for pretoken, count in zip(pretokens, pretoken_counts):
             new_pretoken = []
             i = 0
-            while i+1 < len(pretoken):
-                if pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
+            while i < len(pretoken):
+                if i+1 < len(pretoken) and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
                     new_pretoken.append(merged_token)
                     i += 2
                 else:
                     new_pretoken.append(pretoken[i])
                     i += 1
-
             for token_1, token_2 in zip(new_pretoken[:-1], new_pretoken[1:]):
                 if token_1 == merged_token or token_2 == merged_token:
                     token_1_to_rm = merge[1] if token_1 == merged_token else token_1
                     token_2_to_rm = merge[0] if token_2 == merged_token else token_2
                     pair_counts[(token_1_to_rm, token_2_to_rm)] -= count
                     pair_counts[(token_1, token_2)] += count
-
-            #print(f"pretoken={pretoken}, new_pretoken={new_pretoken}")
             new_pretokens.append(tuple(new_pretoken))
         pretokens = new_pretokens
         del pair_counts[merge]
 
-        #print(f"Token set size: {len(token_set)}, merge: {merge}")
-
-    vocab = {index: token for index, token in enumerate(token_set)}
+    vocab = {index: token for index, token in enumerate(token_list)}
     return vocab, merges
 
 if __name__ == "__main__":
-    print(os.getcwd())
     start_time = time.time()
     vocab, merges = train_bpe(
-        "data/TinyStoriesV2-GPT4-train.txt",
+        "tests/fixtures/corpus.en",
+        #"data/TinyStoriesV2-GPT4-train.txt",
         #"data/test.txt",
-        1000,
+        500,
         ["<|endoftext|>"],
     )
+
+    vocab_out = {get_printable(token): index for index, token in vocab.items()}
+    with open("data/vocab.json", "w") as vocab_file:
+        json.dump(vocab_out, vocab_file, indent=4, ensure_ascii=False)
+    
+    with open("data/merges.txt", "w") as merge_file:
+        for token_1, token_2 in merges:
+            merge_file.write(f"{get_printable(token_1)} {get_printable(token_2)}\n")
+
     end_time = time.time()
     print(f"Total time: {end_time - start_time} seconds")
