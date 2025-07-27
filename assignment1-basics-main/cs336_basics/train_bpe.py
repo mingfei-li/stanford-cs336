@@ -6,15 +6,17 @@ import time
 from collections import Counter
 from collections import defaultdict
 from functools import partial
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool
+from tqdm import tqdm
 from typing import BinaryIO
 
 from tests.common import gpt2_bytes_to_unicode
 
 PRETOKENIZER_PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 GPT2_BYTES_TO_UNICODE = gpt2_bytes_to_unicode()
+N_CHUNKS = 100
 
-def get_printable(token: bytes):
+def printable(token: bytes):
     return "".join(GPT2_BYTES_TO_UNICODE[byte] for byte in token)
 
 def find_chunk_boundaries(
@@ -89,7 +91,7 @@ def pretokenize(
 ) -> tuple[list[tuple[bytes]], list[int]]:
     with Pool() as p:
         boundaries = find_chunk_boundaries(
-            input_path, cpu_count(), "<|endoftext|>".encode("utf-8"))
+            input_path, N_CHUNKS, "<|endoftext|>".encode("utf-8"))
     
         pretoken_counts_by_chunk = p.map(
             partial(pretokenize_chunk, input_path, special_tokens),
@@ -112,24 +114,25 @@ def train_bpe(
     special_tokens: list[str],
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    start_time = time.time()
     pretokens, pretoken_counts = pretokenize(input_path, special_tokens)
     pair_counts = defaultdict(int)
     for pretoken, count in zip(pretokens, pretoken_counts):
         for token_1, token_2 in zip(pretoken[:-1], pretoken[1:]):
             pair_counts[(token_1, token_2)] += count
 
-    token_list = (
+    token_set = set(
         [token.encode("utf-8") for token in special_tokens]
         + [bytes([byte]) for byte in range(256)]
     )
-    token_set = set(token_list)
     merges = []
+    after_pretokenization = time.time()
+    print(f"Pretokenization: {after_pretokenization - start_time}")
 
-    while len(token_list) < vocab_size:
+    for _ in tqdm(range(vocab_size-len(token_set))):
         merge, _ = max(pair_counts.items(), key=lambda x: (x[1], x[0]))
         merged_token = merge[0]+merge[1]
         merges.append(merge)
-        token_list.append(merged_token)
         token_set.add(merged_token)
 
         new_pretokens = []
@@ -153,26 +156,26 @@ def train_bpe(
         pretokens = new_pretokens
         del pair_counts[merge]
 
-    vocab = {index: token for index, token in enumerate(token_list)}
+    after_tokenization = time.time()
+    print(f"Tokenization: {after_tokenization - after_pretokenization}")
+    vocab = {index: token for index, token in enumerate(token_set)}
     return vocab, merges
 
 if __name__ == "__main__":
     start_time = time.time()
     vocab, merges = train_bpe(
-        "tests/fixtures/corpus.en",
-        #"data/TinyStoriesV2-GPT4-train.txt",
-        #"data/test.txt",
-        500,
+        "data/TinyStoriesV2-GPT4-train.txt",
+        10_000,
         ["<|endoftext|>"],
     )
 
-    vocab_out = {get_printable(token): index for index, token in vocab.items()}
-    with open("data/vocab.json", "w") as vocab_file:
+    vocab_out = {printable(token): index for index, token in vocab.items()}
+    with open("tokenizer-data/TinyStoriesV2-GPT4-train-vocab.json", "w") as vocab_file:
         json.dump(vocab_out, vocab_file, indent=4, ensure_ascii=False)
     
-    with open("data/merges.txt", "w") as merge_file:
+    with open("tokenizer-data/TinyStoriesV2-GPT4-train-merges.txt", "w") as merge_file:
         for token_1, token_2 in merges:
-            merge_file.write(f"{get_printable(token_1)} {get_printable(token_2)}\n")
+            merge_file.write(f"{printable(token_1)} {printable(token_2)}\n")
 
     end_time = time.time()
     print(f"Total time: {end_time - start_time} seconds")
