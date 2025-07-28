@@ -6,7 +6,8 @@ import time
 from collections import Counter
 from collections import defaultdict
 from functools import partial
-from multiprocessing import Pool
+from multiprocessing import cpu_count, Pipe, Pool, Process
+from multiprocessing.connection import Connection
 from tqdm import tqdm
 from typing import BinaryIO
 
@@ -110,31 +111,41 @@ def pretokenize(
             tuple(bytes([byte]) for byte in pretoken.encode("utf-8"))
             for pretoken in pretoken_counts
         ]
-        return pretokens, pretoken_counts.values()
+        return pretokens, list(pretoken_counts.values())
 
-def apply_merge(
-    merge: tuple[bytes],
-    merged_token: bytes,
-    pretoken_count: tuple[tuple[bytes], int],
+def tokenize(
+    pretokens:list[tuple[bytes]],
+    counts: list[int],
+    conn: Connection,
 ) -> tuple[bytes, dict[tuple[bytes], int]]:
-    pretoken, count = pretoken_count
-    new_pretoken = []
-    pair_count_delta = defaultdict(int)
-    i = 0
-    while i < len(pretoken):
-        if i+1 < len(pretoken) and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
-            new_pretoken.append(merged_token)
-            i += 2
-        else:
-            new_pretoken.append(pretoken[i])
-            i += 1
-    for token_1, token_2 in zip(new_pretoken[:-1], new_pretoken[1:]):
-        if token_1 == merged_token or token_2 == merged_token:
-            token_1_to_rm = merge[1] if token_1 == merged_token else token_1
-            token_2_to_rm = merge[0] if token_2 == merged_token else token_2
-            pair_count_delta[(token_1_to_rm, token_2_to_rm)] -= count
-            pair_count_delta[(token_1, token_2)] += count
-    return new_pretoken, pair_count_delta
+    while True:
+        merge = conn.recv()
+        if not merge:
+            conn.close()
+            break
+        
+        merged_token = merge[0] + merge[1]
+        pair_count_deltas = defaultdict(int)
+        new_pretokens = []
+        for pretoken, count in zip(pretokens, counts):
+            new_pretoken = []
+            i = 0
+            while i < len(pretoken):
+                if i+1 < len(pretoken) and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
+                    new_pretoken.append(merged_token)
+                    i += 2
+                else:
+                    new_pretoken.append(pretoken[i])
+                    i += 1
+            for token_1, token_2 in zip(new_pretoken[:-1], new_pretoken[1:]):
+                if token_1 == merged_token or token_2 == merged_token:
+                    token_1_to_rm = merge[1] if token_1 == merged_token else token_1
+                    token_2_to_rm = merge[0] if token_2 == merged_token else token_2
+                    pair_count_deltas[(token_1_to_rm, token_2_to_rm)] -= count
+                    pair_count_deltas[(token_1, token_2)] += count
+            new_pretokens.append(new_pretoken)
+        pretokens = new_pretokens
+        conn.send(pair_count_deltas)
 
 def train_bpe(
     input_path: str | os.PathLike,
@@ -154,23 +165,46 @@ def train_bpe(
     )
     merges = []
 
-    with Pool() as p:
-        for _ in tqdm(range(vocab_size-len(token_set)), desc="Tokenization"):
-            merge, _ = max(pair_counts.items(), key=lambda x: (x[1], x[0]))
-            merged_token = merge[0]+merge[1]
-            merges.append(merge)
-            token_set.add(merged_token)
+    n_processes = cpu_count()-1
+    pretoken_chunk_size = len(pretokens) // n_processes
+    chunk_boundaries = [i*pretoken_chunk_size for i in range(n_processes+1)]
+    chunk_boundaries[-1] = len(pretokens)
+    conns = []
+    processes = []
+    for start, end in zip(chunk_boundaries[:-1], chunk_boundaries[1:]):
+        conn, child_conn = Pipe()
+        conns.append(conn)
+        processes.append(Process(
+            target=tokenize,
+            args=(
+                pretokens[start:end],
+                pretoken_counts[start:end],
+                child_conn,
+            ),
+        ))
+    for process in processes:
+        process.start()
 
-            results = p.imap(
-                partial(apply_merge, merge, merged_token),
-                zip(pretokens, pretoken_counts),
-            )
-            pretokens = []
-            for pretoken, pair_count_delta in results:
-                pretokens.append(pretoken)
-                for pair, delta in pair_count_delta.items():
-                    pair_counts[pair] += delta
-            del pair_counts[merge]
+    for _ in tqdm(range(vocab_size-len(token_set)), desc="Tokenization"):
+        merge, _ = max(pair_counts.items(), key=lambda x: (x[1], x[0]))
+        merged_token = merge[0]+merge[1]
+        merges.append(merge)
+        token_set.add(merged_token)
+
+        for conn in conns:
+            conn.send(merge)
+
+        for conn in conns:
+            deltas = conn.recv()
+            for pair, delta in deltas.items():
+                pair_counts[pair] += delta
+        del pair_counts[merge]
+
+    for conn in conns:
+        conn.send(0)
+
+    for process in processes:
+        process.join()
 
     vocab = {index: token for index, token in enumerate(token_set)}
     return vocab, merges
@@ -180,7 +214,7 @@ if __name__ == "__main__":
     start_time = time.time()
     vocab, merges = train_bpe(
         f"data/{dataset}.txt",
-        32_000,
+        10_000,
         ["<|endoftext|>"],
     )
 
