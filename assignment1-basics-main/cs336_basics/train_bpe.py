@@ -93,9 +93,13 @@ def pretokenize(
         boundaries = find_chunk_boundaries(
             input_path, N_CHUNKS, "<|endoftext|>".encode("utf-8"))
     
-        pretoken_counts_by_chunk = p.map(
-            partial(pretokenize_chunk, input_path, special_tokens),
-            list(zip(boundaries[:-1], boundaries[1:])),
+        pretoken_counts_by_chunk = tqdm(
+            p.imap_unordered(
+                partial(pretokenize_chunk, input_path, special_tokens),
+                zip(boundaries[:-1], boundaries[1:]),
+            ),
+            total=len(boundaries)-1,
+            desc="Pretokenization"
         )
         pretoken_counts = defaultdict(int)
         for chunk_pretoken_counts in pretoken_counts_by_chunk:
@@ -108,13 +112,36 @@ def pretokenize(
         ]
         return pretokens, pretoken_counts.values()
 
+def apply_merge(
+    merge: tuple[bytes],
+    merged_token: bytes,
+    pretoken_count: tuple[tuple[bytes], int],
+) -> tuple[bytes, dict[tuple[bytes], int]]:
+    pretoken, count = pretoken_count
+    new_pretoken = []
+    pair_count_delta = defaultdict(int)
+    i = 0
+    while i < len(pretoken):
+        if i+1 < len(pretoken) and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
+            new_pretoken.append(merged_token)
+            i += 2
+        else:
+            new_pretoken.append(pretoken[i])
+            i += 1
+    for token_1, token_2 in zip(new_pretoken[:-1], new_pretoken[1:]):
+        if token_1 == merged_token or token_2 == merged_token:
+            token_1_to_rm = merge[1] if token_1 == merged_token else token_1
+            token_2_to_rm = merge[0] if token_2 == merged_token else token_2
+            pair_count_delta[(token_1_to_rm, token_2_to_rm)] -= count
+            pair_count_delta[(token_1, token_2)] += count
+    return new_pretoken, pair_count_delta
+
 def train_bpe(
     input_path: str | os.PathLike,
     vocab_size: int,
     special_tokens: list[str],
     **kwargs,
 ) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    start_time = time.time()
     pretokens, pretoken_counts = pretokenize(input_path, special_tokens)
     pair_counts = defaultdict(int)
     for pretoken, count in zip(pretokens, pretoken_counts):
@@ -126,54 +153,42 @@ def train_bpe(
         + [bytes([byte]) for byte in range(256)]
     )
     merges = []
-    after_pretokenization = time.time()
-    print(f"Pretokenization: {after_pretokenization - start_time}")
 
-    for _ in tqdm(range(vocab_size-len(token_set))):
-        merge, _ = max(pair_counts.items(), key=lambda x: (x[1], x[0]))
-        merged_token = merge[0]+merge[1]
-        merges.append(merge)
-        token_set.add(merged_token)
+    with Pool() as p:
+        for _ in tqdm(range(vocab_size-len(token_set)), desc="Tokenization"):
+            merge, _ = max(pair_counts.items(), key=lambda x: (x[1], x[0]))
+            merged_token = merge[0]+merge[1]
+            merges.append(merge)
+            token_set.add(merged_token)
 
-        new_pretokens = []
-        for pretoken, count in zip(pretokens, pretoken_counts):
-            new_pretoken = []
-            i = 0
-            while i < len(pretoken):
-                if i+1 < len(pretoken) and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
-                    new_pretoken.append(merged_token)
-                    i += 2
-                else:
-                    new_pretoken.append(pretoken[i])
-                    i += 1
-            for token_1, token_2 in zip(new_pretoken[:-1], new_pretoken[1:]):
-                if token_1 == merged_token or token_2 == merged_token:
-                    token_1_to_rm = merge[1] if token_1 == merged_token else token_1
-                    token_2_to_rm = merge[0] if token_2 == merged_token else token_2
-                    pair_counts[(token_1_to_rm, token_2_to_rm)] -= count
-                    pair_counts[(token_1, token_2)] += count
-            new_pretokens.append(tuple(new_pretoken))
-        pretokens = new_pretokens
-        del pair_counts[merge]
+            results = p.imap(
+                partial(apply_merge, merge, merged_token),
+                zip(pretokens, pretoken_counts),
+            )
+            pretokens = []
+            for pretoken, pair_count_delta in results:
+                pretokens.append(pretoken)
+                for pair, delta in pair_count_delta.items():
+                    pair_counts[pair] += delta
+            del pair_counts[merge]
 
-    after_tokenization = time.time()
-    print(f"Tokenization: {after_tokenization - after_pretokenization}")
     vocab = {index: token for index, token in enumerate(token_set)}
     return vocab, merges
 
 if __name__ == "__main__":
+    dataset = "TinyStoriesV2-GPT4-train"
     start_time = time.time()
     vocab, merges = train_bpe(
-        "data/TinyStoriesV2-GPT4-train.txt",
-        10_000,
+        f"data/{dataset}.txt",
+        32_000,
         ["<|endoftext|>"],
     )
 
     vocab_out = {printable(token): index for index, token in vocab.items()}
-    with open("tokenizer-data/TinyStoriesV2-GPT4-train-vocab.json", "w") as vocab_file:
+    with open(f"tokenizer-data/{dataset}.json", "w") as vocab_file:
         json.dump(vocab_out, vocab_file, indent=4, ensure_ascii=False)
     
-    with open("tokenizer-data/TinyStoriesV2-GPT4-train-merges.txt", "w") as merge_file:
+    with open(f"tokenizer-data/{dataset}-merges.txt", "w") as merge_file:
         for token_1, token_2 in merges:
             merge_file.write(f"{printable(token_1)} {printable(token_2)}\n")
 
