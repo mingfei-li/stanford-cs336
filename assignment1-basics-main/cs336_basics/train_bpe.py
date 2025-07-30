@@ -8,10 +8,11 @@ from collections import defaultdict
 from functools import partial
 from multiprocessing import cpu_count, Pipe, Pool, Process
 from multiprocessing.connection import Connection
+from sortedcontainers import SortedSet
 from tqdm import tqdm
 from typing import BinaryIO
 
-from tests.common import gpt2_bytes_to_unicode
+from .common import gpt2_bytes_to_unicode
 
 PRETOKENIZER_PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 GPT2_BYTES_TO_UNICODE = gpt2_bytes_to_unicode()
@@ -89,7 +90,7 @@ def pretokenize_chunk(
 def pretokenize(
     input_path: str | os.PathLike,
     special_tokens: list[str],
-) -> tuple[list[tuple[bytes]], list[int]]:
+) -> tuple[list[list[bytes]], list[int]]:
     with Pool() as p:
         boundaries = find_chunk_boundaries(
             input_path, N_CHUNKS, "<|endoftext|>".encode("utf-8"))
@@ -108,16 +109,17 @@ def pretokenize(
                 pretoken_counts[pretoken] += count
         
         pretokens = [
-            tuple(bytes([byte]) for byte in pretoken.encode("utf-8"))
+            [bytes([byte]) for byte in pretoken.encode("utf-8")]
             for pretoken in pretoken_counts
         ]
         return pretokens, list(pretoken_counts.values())
 
 def tokenize(
-    pretokens:list[tuple[bytes]],
+    pretokens:list[list[bytes]],
     counts: list[int],
     conn: Connection,
 ) -> tuple[bytes, dict[tuple[bytes], int]]:
+    pretoken_lens = [len(pretoken) for pretoken in pretokens]
     while True:
         merge = conn.recv()
         if not merge:
@@ -126,25 +128,32 @@ def tokenize(
         
         merged_token = merge[0] + merge[1]
         pair_count_deltas = defaultdict(int)
-        new_pretokens = []
-        for pretoken, count in zip(pretokens, counts):
-            new_pretoken = []
+        for k in range(len(pretokens)):
+            pretoken = pretokens[k]
+            count = counts[k]
+            n = pretoken_lens[k]
             i = 0
-            while i < len(pretoken):
-                if i+1 < len(pretoken) and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
-                    new_pretoken.append(merged_token)
+            j = 0
+            while i < n:
+                if i+1 < n and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
+                    pretoken[j] = merged_token
                     i += 2
+                    j += 1
                 else:
-                    new_pretoken.append(pretoken[i])
+                    pretoken[j] = pretoken[i]
                     i += 1
-            for token_1, token_2 in zip(new_pretoken[:-1], new_pretoken[1:]):
+                    j += 1
+            pretoken_lens[k] = j
+
+            for i in range(j-1):
+                token_1 = pretoken[i]
+                token_2 = pretoken[i+1]
                 if token_1 == merged_token or token_2 == merged_token:
                     token_1_to_rm = merge[1] if token_1 == merged_token else token_1
                     token_2_to_rm = merge[0] if token_2 == merged_token else token_2
                     pair_count_deltas[(token_1_to_rm, token_2_to_rm)] -= count
                     pair_count_deltas[(token_1, token_2)] += count
-            new_pretokens.append(new_pretoken)
-        pretokens = new_pretokens
+
         conn.send(pair_count_deltas)
 
 def train_bpe(
@@ -185,8 +194,9 @@ def train_bpe(
     for process in processes:
         process.start()
 
+    pair_count_set = SortedSet((count, pair) for pair, count in pair_counts.items())
     for _ in tqdm(range(vocab_size-len(token_set)), desc="Tokenization"):
-        merge, _ = max(pair_counts.items(), key=lambda x: (x[1], x[0]))
+        _, merge = pair_count_set[-1]
         merged_token = merge[0]+merge[1]
         merges.append(merge)
         token_set.add(merged_token)
@@ -194,10 +204,18 @@ def train_bpe(
         for conn in conns:
             conn.send(merge)
 
+        merged_deltas = defaultdict(int)
         for conn in conns:
             deltas = conn.recv()
             for pair, delta in deltas.items():
-                pair_counts[pair] += delta
+                merged_deltas[pair] += delta
+            
+        for pair, delta in merged_deltas.items():
+            pair_count_set.discard((pair_counts[pair], pair))
+            pair_counts[pair] += delta
+            pair_count_set.add((pair_counts[pair], pair))
+
+        pair_count_set.remove((pair_counts[merge], merge))
         del pair_counts[merge]
 
     for conn in conns:
@@ -210,11 +228,12 @@ def train_bpe(
     return vocab, merges
 
 if __name__ == "__main__":
-    dataset = "owt_train"
+    #dataset = "owt_train"
+    dataset = "TinyStoriesV2-GPT4-train"
     start_time = time.time()
     vocab, merges = train_bpe(
         f"data/{dataset}.txt",
-        32_000,
+        10_000,
         ["<|endoftext|>"],
     )
 
