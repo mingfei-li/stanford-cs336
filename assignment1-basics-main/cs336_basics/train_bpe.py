@@ -116,89 +116,19 @@ def pretokenize(
 
 def tokenize(
     pretokens:list[list[bytes]],
-    counts: list[int],
+    pretoken_counts: list[int],
     conn: Connection,
 ) -> tuple[bytes, dict[tuple[bytes], int]]:
-    pretoken_lens = [len(pretoken) for pretoken in pretokens]
+    pair_index, prev_token_index, next_token_index = build_indexes(pretokens)
     while True:
         merge = conn.recv()
         if not merge:
             conn.close()
             break
         
+        token_1 = merge[0]
+        token_2 = merge[1]
         merged_token = merge[0] + merge[1]
-        pair_count_deltas = defaultdict(int)
-        for k in range(len(pretokens)):
-            pretoken = pretokens[k]
-            count = counts[k]
-            n = pretoken_lens[k]
-            i = 0
-            j = 0
-            while i < n:
-                if i+1 < n and pretoken[i] == merge[0] and pretoken[i+1] == merge[1]:
-                    pretoken[j] = merged_token
-                    i += 2
-                    j += 1
-                else:
-                    pretoken[j] = pretoken[i]
-                    i += 1
-                    j += 1
-            pretoken_lens[k] = j
-
-            for i in range(j-1):
-                token_1 = pretoken[i]
-                token_2 = pretoken[i+1]
-                if token_1 == merged_token or token_2 == merged_token:
-                    token_1_to_rm = merge[1] if token_1 == merged_token else token_1
-                    token_2_to_rm = merge[0] if token_2 == merged_token else token_2
-                    pair_count_deltas[(token_1_to_rm, token_2_to_rm)] -= count
-                    pair_count_deltas[(token_1, token_2)] += count
-
-        conn.send(pair_count_deltas)
-
-def build_indexes(
-    pretokens: list[tuple[bytes]]
-) -> tuple[defaultdict[SortedSet], list[list[int]], list[list[int]]]:
-    pair_index = defaultdict(SortedSet)
-    prev_token_index = [None] * len(pretokens)
-    next_token_index = [None] * len(pretokens)
-    for i in range(len(pretokens)):
-        for j in range(len(pretokens[i])-1):
-            token_1 = pretokens[i][j]
-            token_2 = pretokens[i][j+1]
-            pair_index[(token_1,token_2)].add((i, j))
-        prev_token_index[i] = list(range(-1, len(pretokens[i])-1))
-        next_token_index[i] = list(range(1, len(pretokens[i])+1))
-
-    return pair_index, prev_token_index, next_token_index
-
-def train_bpe(
-    input_path: str | os.PathLike,
-    vocab_size: int,
-    special_tokens: list[str],
-    **kwargs,
-) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
-    token_set = set(
-        [token.encode("utf-8") for token in special_tokens]
-        + [bytes([byte]) for byte in range(256)]
-    )
-    merges = []
-
-    pair_counts = defaultdict(int)
-    pretokens, pretoken_counts = pretokenize(input_path, special_tokens)
-    for pretoken, count in zip(pretokens, pretoken_counts):
-        for token_1, token_2 in zip(pretoken[:-1], pretoken[1:]):
-            pair_counts[(token_1, token_2)] += count
-    pair_index, prev_token_index, next_token_index = build_indexes(pretokens)
-    count_pair_set = SortedSet((count, pair) for pair, count in pair_counts.items())
-    for _ in tqdm(range(vocab_size - len(token_set)), "Tokenization"):
-        count, merge = count_pair_set[-1]
-        token_1, token_2 = merge
-        merged_token = token_1 + token_2
-
-        merges.append(merge)
-        token_set.add(merged_token)
-
         pair_count_deltas = defaultdict(int)
         for pretoken_id, pos_1 in pair_index[merge].copy():
             pos_2 = pos_1 + len(token_1)
@@ -238,12 +168,91 @@ def train_bpe(
                 prev_token_index[pretoken_id][next_token_pos] = pos_1
 
         del pair_index[merge]
-        count_pair_set.remove((pair_counts[merge], merge))
-        del pair_counts[merge]
+        conn.send(pair_count_deltas)
+
+def build_indexes(
+    pretokens: list[tuple[bytes]]
+) -> tuple[defaultdict[SortedSet], list[list[int]], list[list[int]]]:
+    pair_index = defaultdict(SortedSet)
+    prev_token_index = [None] * len(pretokens)
+    next_token_index = [None] * len(pretokens)
+    for i in range(len(pretokens)):
+        for j in range(len(pretokens[i])-1):
+            token_1 = pretokens[i][j]
+            token_2 = pretokens[i][j+1]
+            pair_index[(token_1,token_2)].add((i, j))
+        prev_token_index[i] = list(range(-1, len(pretokens[i])-1))
+        next_token_index[i] = list(range(1, len(pretokens[i])+1))
+
+    return pair_index, prev_token_index, next_token_index
+
+def train_bpe(
+    input_path: str | os.PathLike,
+    vocab_size: int,
+    special_tokens: list[str],
+    **kwargs,
+) -> tuple[dict[int, bytes], list[tuple[bytes, bytes]]]:
+    token_set = set(
+        [token.encode("utf-8") for token in special_tokens]
+        + [bytes([byte]) for byte in range(256)]
+    )
+    merges = []
+
+    pretokens, pretoken_counts = pretokenize(input_path, special_tokens)
+
+    n_processes = cpu_count() - 1
+    chunk_size = len(pretokens) // n_processes
+    boundaries = [i * chunk_size for i in range(n_processes+1)]
+    boundaries[-1] = len(pretokens)
+    connections = []
+    processes = []
+    for i in range(n_processes):
+        parent_conn, child_conn = Pipe()
+        process = Process(
+            target=tokenize,
+            args=(
+                pretokens[boundaries[i]:boundaries[i+1]],
+                pretoken_counts[boundaries[i]:boundaries[i+1]],
+                child_conn,
+            ),
+        )
+        process.start()
+        processes.append(process)
+        connections.append(parent_conn)
+
+    pair_counts = defaultdict(int)
+    for pretoken, count in zip(pretokens, pretoken_counts):
+        for token_1, token_2 in zip(pretoken[:-1], pretoken[1:]):
+            pair_counts[(token_1, token_2)] += count
+    count_pair_set = SortedSet((count, pair) for pair, count in pair_counts.items())
+    for _ in tqdm(range(vocab_size - len(token_set)), "Tokenization"):
+        count, merge = count_pair_set[-1]
+        token_1, token_2 = merge
+        merged_token = token_1 + token_2
+
+        merges.append(merge)
+        token_set.add(merged_token)
+
+        for conn in connections:
+            conn.send(merge)
+
+        pair_count_deltas = defaultdict(int)
+        for conn in connections:
+            deltas = conn.recv()
+            for pair, delta in deltas.items():
+                pair_count_deltas[pair] += delta
+
         for pair, delta in pair_count_deltas.items():
             count_pair_set.discard((pair_counts[pair], pair))
             pair_counts[pair] += delta
             count_pair_set.add((pair_counts[pair], pair))
+        count_pair_set.remove((pair_counts[merge], merge))
+        del pair_counts[merge]
+
+    for conn in connections:
+        conn.send(0)
+    for process in processes:
+        process.join()
 
     vocab = {index: token for index, token in enumerate(token_set)}
     return vocab, merges
