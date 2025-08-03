@@ -258,12 +258,12 @@ def train_bpe(
     return vocab, merges
 
 if __name__ == "__main__":
-    #dataset = "owt_train"
-    dataset = "TinyStoriesV2-GPT4-train"
+    dataset = "owt_train"
+    # dataset = "TinyStoriesV2-GPT4-train"
     start_time = time.time()
     vocab, merges = train_bpe(
         f"data/{dataset}.txt",
-        10_000,
+        32_000,
         ["<|endoftext|>"],
     )
 
