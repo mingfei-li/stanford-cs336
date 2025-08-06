@@ -5,6 +5,7 @@ from functools import lru_cache
 
 FIXTURES_PATH = (pathlib.Path(__file__).resolve().parent) / "fixtures"
 
+PRETOKENIZER_PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
 @lru_cache
 def gpt2_bytes_to_unicode() -> dict[int, str]:

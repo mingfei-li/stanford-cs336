@@ -12,9 +12,8 @@ from sortedcontainers import SortedSet
 from tqdm import tqdm
 from typing import BinaryIO
 
-from .common import gpt2_bytes_to_unicode
+from .common import gpt2_bytes_to_unicode, PRETOKENIZER_PAT
 
-PRETOKENIZER_PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 GPT2_BYTES_TO_UNICODE = gpt2_bytes_to_unicode()
 N_CHUNKS = 100
 
