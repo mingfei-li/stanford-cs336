@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 import regex as re
 from .common import gpt2_bytes_to_unicode, PRETOKENIZER_PAT
@@ -14,9 +15,13 @@ class Tokenizer():
         special_tokens: list[str] = None,
     ) -> None:
         self.id_to_token = vocab
-        self.token_to_id = {v:k for k,v in vocab}
+        self.token_to_id = {v:k for k,v in vocab.items()}
         self.merges = merges
-        self.special_tokens = set(special_tokens)
+        self.special_tokens = (
+            sorted(special_tokens, key=len, reverse=True)
+            if special_tokens is not None else None
+        )
+        self.special_token_set = set(special_tokens or [])
         self.pretoken_encoding_cache = {}
 
         next_token_id = len(vocab)
@@ -28,6 +33,7 @@ class Tokenizer():
                     self.id_to_token[next_token_id] = token
                     next_token_id += 1
 
+    @classmethod
     def from_files(
         cls,
         vocab_filepath: str,
@@ -44,14 +50,14 @@ class Tokenizer():
                 assert len(token_pair) == 2
                 merges.append(merge)
         
-        return Tokenzier(vocab, merges, special_tokens)
+        return cls(vocab, merges, special_tokens)
 
     def _encode_pretoken(self, pretoken: str) -> list[int]:
         if pretoken in self.pretoken_encoding_cache:
             return self.pretoken_encoding_cache[pretoken]
         
-        pretoken_bytes = [bytes([byte]) for byte in pretoken.encode("utf-8")]
-        n = len(pretoken_bytes)
+        tokens = [bytes([byte]) for byte in pretoken.encode("utf-8")]
+        n = len(tokens)
         for merge in self.merges:
             token_1, token_2 = merge
             merged_token = token_1 + token_2
@@ -59,28 +65,31 @@ class Tokenizer():
             i = 0
             j = 0
             while i < n:
-                if i+1 < n and pretoken_bytes[i] == token_1 and pretoken_bytes[i+1] == token_2:
-                    pretoken_bytes[j] = merged_token
+                if i+1 < n and tokens[i] == token_1 and tokens[i+1] == token_2:
+                    tokens[j] = merged_token
                     j += 1
                     i += 2
                 else:
-                    pretoken_bytes[j] = pretoken_bytes[i]
+                    tokens[j] = tokens[i]
                     j += 1
                     i += 1
             n = j
-        encoded = [self.token_to_id[token[i]] for i in range(n)]
+        encoded = [self.token_to_id[tokens[i]] for i in range(n)]
         self.pretoken_encoding_cache[pretoken] = encoded
         return encoded
 
     def encode(self, text: str) -> list[int]:
-        documents = re.split(
-            "(" + "|".join(map(re.escape, self.special_tokens)) + ")",
-            text,
-        )
+        if self.special_tokens:
+            documents = re.split(
+                "(" + "|".join(map(re.escape, self.special_tokens)) + ")",
+                text,
+            )
+        else:
+            documents = [text]
         encoded = []
         for doc in documents:
-            if doc in self.special_tokens:
-                encoded.append(self.token_to_id[doc])
+            if doc in self.special_token_set:
+                encoded.append(self.token_to_id[doc.encode("utf-8")])
             else:
                 for match in re.finditer(PRETOKENIZER_PAT, doc):
                     pretoken = match.group()
