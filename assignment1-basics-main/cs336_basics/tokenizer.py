@@ -5,7 +5,7 @@ from .common import gpt2_bytes_to_unicode, PRETOKENIZER_PAT
 
 unicode_to_byte = {v:k for k,v in gpt2_bytes_to_unicode().items()}
 def unicode_string_to_bytes(s: str) -> bytes:
-    return bytes([unicode_to_byte(c) for c in s])
+    return bytes([unicode_to_byte[c] for c in s])
 
 class Tokenizer():
     def __init__(
@@ -46,8 +46,8 @@ class Tokenizer():
         with open(merges_filepath, "r") as f:
             merges = []
             for line in f:
-                merge = tuple(unicode_string_to_bytes(s) for s in line.split(" "))
-                assert len(token_pair) == 2
+                merge = tuple(unicode_string_to_bytes(s) for s in line.strip().split(" "))
+                assert len(merge) == 2
                 merges.append(merge)
         
         return cls(vocab, merges, special_tokens)
