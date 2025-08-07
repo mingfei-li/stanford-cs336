@@ -16,6 +16,7 @@ from .common import gpt2_bytes_to_unicode, PRETOKENIZER_PAT
 
 GPT2_BYTES_TO_UNICODE = gpt2_bytes_to_unicode()
 N_CHUNKS = 100
+PRETOKENIZATION_PATTERN = re.compile(PRETOKENIZER_PAT)
 
 def printable(token: bytes):
     return "".join(GPT2_BYTES_TO_UNICODE[byte] for byte in token)
@@ -82,14 +83,14 @@ def pretokenize_chunk(
     documents = re.split("|".join(escaped_special_tokens), chunk)
     pretoken_counts = defaultdict(int)
     for doc in documents:
-        for match in re.finditer(PRETOKENIZER_PAT, doc):
+        for match in PRETOKENIZATION_PATTERN.finditer(doc):
             pretoken_counts[match.group()] += 1
     return pretoken_counts
 
 def pretokenize(
     input_path: str | os.PathLike,
     special_tokens: list[str],
-) -> tuple[list[tuple[bytes]], list[int]]:
+) -> tuple[list[list[bytes]], list[int]]:
     with Pool() as p:
         boundaries = find_chunk_boundaries(
             input_path, N_CHUNKS, "<|endoftext|>".encode("utf-8"))
@@ -108,16 +109,16 @@ def pretokenize(
                 pretoken_counts[pretoken] += count
         
         pretokens = [
-            tuple(bytes([byte]) for byte in pretoken.encode("utf-8"))
+            list(bytes([byte]) for byte in pretoken.encode("utf-8"))
             for pretoken in pretoken_counts
         ]
         return pretokens, list(pretoken_counts.values())
 
 def tokenize(
-    pretokens:list[tuple[bytes]],
+    pretokens:list[list[bytes]],
     pretoken_counts: list[int],
     conn: Connection,
-) -> tuple[bytes, dict[tuple[bytes], int]]:
+) -> None:
     pair_index, prev_token_index, next_token_index = build_indexes(pretokens)
     while True:
         merge = conn.recv()
@@ -137,13 +138,15 @@ def tokenize(
             ):
                 continue
 
+            pretokens[pretoken_id][pos_1] = merged_token
+            pretokens[pretoken_id][pos_2] = None
             prev_token_pos = prev_token_index[pretoken_id][pos_1]
             next_token_pos = next_token_index[pretoken_id][pos_2]
             next_token_index[pretoken_id][pos_1] = next_token_pos
             prev_token_index[pretoken_id][pos_2] = None
             next_token_index[pretoken_id][pos_2] = None
             if prev_token_pos >= 0:
-                prev_token = b"".join(pretokens[pretoken_id][prev_token_pos:pos_1])
+                prev_token = pretokens[pretoken_id][prev_token_pos]
                 prev_pair = (prev_token, token_1)
                 new_pair_1 = (prev_token, merged_token)
 
@@ -153,8 +156,7 @@ def tokenize(
                 pair_index[new_pair_1].add((pretoken_id, prev_token_pos))
                 pair_count_deltas[new_pair_1] += pretoken_counts[pretoken_id]
             if next_token_pos < len(pretokens[pretoken_id]):
-                next_token_end = next_token_index[pretoken_id][next_token_pos]
-                next_token = b"".join(pretokens[pretoken_id][next_token_pos:next_token_end])
+                next_token = pretokens[pretoken_id][next_token_pos]
                 next_pair = (token_2, next_token)
                 new_pair_2 = (merged_token, next_token)
 
@@ -170,7 +172,7 @@ def tokenize(
         conn.send(pair_count_deltas)
 
 def build_indexes(
-    pretokens: list[tuple[bytes]]
+    pretokens: list[list[bytes]]
 ) -> tuple[defaultdict[SortedSet], list[list[int]], list[list[int]]]:
     pair_index = defaultdict(SortedSet)
     prev_token_index = [None] * len(pretokens)
