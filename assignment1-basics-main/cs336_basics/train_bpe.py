@@ -89,7 +89,7 @@ def pretokenize_chunk(
 def pretokenize(
     input_path: str | os.PathLike,
     special_tokens: list[str],
-) -> tuple[list[list[bytes]], list[int]]:
+) -> tuple[list[tuple[bytes]], list[int]]:
     with Pool() as p:
         boundaries = find_chunk_boundaries(
             input_path, N_CHUNKS, "<|endoftext|>".encode("utf-8"))
@@ -114,7 +114,7 @@ def pretokenize(
         return pretokens, list(pretoken_counts.values())
 
 def tokenize(
-    pretokens:list[list[bytes]],
+    pretokens:list[tuple[bytes]],
     pretoken_counts: list[int],
     conn: Connection,
 ) -> tuple[bytes, dict[tuple[bytes], int]]:
