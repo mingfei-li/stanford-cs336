@@ -1,6 +1,10 @@
 from __future__ import annotations
+import argparse
 import json
 import regex as re
+from collections import defaultdict
+from time import time
+from tqdm import tqdm
 from .common import gpt2_bytes_to_unicode, PRETOKENIZER_PAT
 
 unicode_to_byte = {v:k for k,v in gpt2_bytes_to_unicode().items()}
@@ -58,23 +62,36 @@ class Tokenizer():
         
         tokens = [bytes([byte]) for byte in pretoken.encode("utf-8")]
         n = len(tokens)
+        index = defaultdict(set)
+        for i in range(n-1):
+            index[(tokens[i],tokens[i+1])].add(i)
+        prev_pos = list(range(-1, n-1))
+        next_pos = list(range(1, n+1))
+
         for merge in self.merges:
+            if merge not in index:
+                continue
+
             token_1, token_2 = merge
             merged_token = token_1 + token_2
+            for pos_1 in index[merge].copy():
+                pos_2 = pos_1 + len(token_1)
+                if tokens[pos_1] != token_1 or tokens[pos_2] != token_2:
+                    continue
+                
+                tokens[pos_1] = merged_token
+                tokens[pos_2] = None
+                next_pos[pos_1] = next_pos[pos_2]
+                if next_pos[pos_1] < n:
+                    prev_pos[next_pos[pos_1]] = pos_1
+                    index[(token_2, tokens[next_pos[pos_1]])].remove(pos_2)
+                    index[(merged_token, tokens[next_pos[pos_1]])].add(pos_1)
+                if prev_pos[pos_1] >= 0:
+                    index[(tokens[prev_pos[pos_1]], token_1)].remove(prev_pos[pos_1])
+                    index[(tokens[prev_pos[pos_1]], merged_token)].add(prev_pos[pos_1])
+            del index[merge]
 
-            i = 0
-            j = 0
-            while i < n:
-                if i+1 < n and tokens[i] == token_1 and tokens[i+1] == token_2:
-                    tokens[j] = merged_token
-                    j += 1
-                    i += 2
-                else:
-                    tokens[j] = tokens[i]
-                    j += 1
-                    i += 1
-            n = j
-        encoded = [self.token_to_id[tokens[i]] for i in range(n)]
+        encoded = [self.token_to_id[token] for token in tokens if token is not None]
         self.pretoken_encoding_cache[pretoken] = encoded
         return encoded
 
@@ -105,3 +122,54 @@ class Tokenizer():
     def decode(self, ids: list[int]) -> str:
         utf8_encoded = b"".join(self.id_to_token[id] for id in ids)
         return utf8_encoded.decode("utf-8", errors="replace")
+
+def sample_text(
+    input_filepath: str,
+    sample_filepath: str,
+    n_samples: int,
+    special_token,
+) -> None:
+    with open(input_filepath, "rb") as f:
+        chunk = f.read(1_000_000).decode("utf-8")
+    docs = re.split(re.escape(special_token), chunk)
+    with open(sample_filepath, "w") as f:
+        f.write(special_token.join(docs[:n_samples]))
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("action", help="choose an action from encode/decode")
+    parser.add_argument("--tokenizer")
+    parser.add_argument("--input")
+    parser.add_argument("--n_samples", type=int, default=0)
+
+    args = parser.parse_args()
+
+    vocab_filepath = f"tokenizer_data/{args.tokenizer}.json"
+    merges_filepath = f"tokenizer_data/{args.tokenizer}-merges.txt"
+    input_filepath = f"data/{args.input}.txt"
+    sample_filepath = f"data/{args.input}-sample.txt"
+    output_filepath = f"data/{args.input}-token-ids.txt"
+    special_token = "<|endoftext|>"
+
+    tokenizer = Tokenizer.from_files(
+        vocab_filepath,
+        merges_filepath,
+        [special_token],
+    )
+
+    start_time = time()
+    if args.action == "encode":
+        if args.n_samples > 0:
+            sample_text(
+                input_filepath,
+                sample_filepath,
+                args.n_samples,
+                special_token,
+            )
+            input_filepath = sample_filepath
+        with open(input_filepath, "r") as f_in, open(output_filepath, "w") as f_out:
+            for output in tqdm(tokenizer.encode_iterable(f_in)):
+                f_out.write(str(output))
+                f_out.write(" ")
+    end_time = time()
+    print(f"Total time: {end_time - start_time:.2f}")

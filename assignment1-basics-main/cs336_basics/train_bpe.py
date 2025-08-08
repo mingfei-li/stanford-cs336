@@ -269,10 +269,10 @@ if __name__ == "__main__":
     )
 
     vocab_out = {printable(token): index for index, token in vocab.items()}
-    with open(f"tokenizer-data/{dataset}.json", "w") as vocab_file:
+    with open(f"tokenizer_data/{dataset}.json", "w") as vocab_file:
         json.dump(vocab_out, vocab_file, indent=4, ensure_ascii=False)
     
-    with open(f"tokenizer-data/{dataset}-merges.txt", "w") as merge_file:
+    with open(f"tokenizer_data/{dataset}-merges.txt", "w") as merge_file:
         for token_1, token_2 in merges:
             merge_file.write(f"{printable(token_1)} {printable(token_2)}\n")
 
