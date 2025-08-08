@@ -1,11 +1,12 @@
 from __future__ import annotations
 import argparse
 import json
+import os
 import regex as re
 from collections import defaultdict
 from time import time
 from tqdm import tqdm
-from .common import gpt2_bytes_to_unicode, PRETOKENIZER_PAT
+from .common import find_chunk_boundaries, gpt2_bytes_to_unicode, PRETOKENIZER_PAT
 
 unicode_to_byte = {v:k for k,v in gpt2_bytes_to_unicode().items()}
 def unicode_string_to_bytes(s: str) -> bytes:
@@ -127,13 +128,26 @@ def sample_text(
     input_filepath: str,
     sample_filepath: str,
     n_samples: int,
-    special_token,
+    split_special_token: str,
 ) -> None:
     with open(input_filepath, "rb") as f:
         chunk = f.read(1_000_000).decode("utf-8")
-    docs = re.split(re.escape(special_token), chunk)
+    docs = re.split(re.escape(split_special_token), chunk)
     with open(sample_filepath, "w") as f:
-        f.write(special_token.join(docs[:n_samples]))
+        f.write(split_special_token.join(docs[:n_samples]))
+
+def generate_chunks(
+    input_filepath: str | os.PathLike,
+    split_special_token: str,
+) -> Iterator[str]:
+    chunk_boundaries = find_chunk_boundaries(
+        input_filepath,
+        split_special_token.encode("utf-8"),
+    )
+    with open(input_filepath, "rb") as f:
+        for start, end in tqdm(zip(chunk_boundaries[:-1], chunk_boundaries[1:]), "Tokenizing"):
+            f.seek(start)
+            yield f.read(end - start).decode("utf-8")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -146,30 +160,45 @@ if __name__ == "__main__":
 
     vocab_filepath = f"tokenizer_data/{args.tokenizer}.json"
     merges_filepath = f"tokenizer_data/{args.tokenizer}-merges.txt"
-    input_filepath = f"data/{args.input}.txt"
-    sample_filepath = f"data/{args.input}-sample.txt"
-    output_filepath = f"data/{args.input}-token-ids.txt"
-    special_token = "<|endoftext|>"
+    text_filepath = f"data/{args.input}.txt"
+    text_sample_filepath = f"data/{args.input}-sample.txt"
+    decoded_text_filepath = f"data/{args.input}-decoded.txt"
+    token_ids_filepath = f"data/{args.input}-token-ids.txt"
+    split_special_token = "<|endoftext|>"
 
     tokenizer = Tokenizer.from_files(
         vocab_filepath,
         merges_filepath,
-        [special_token],
+        [split_special_token],
     )
 
     start_time = time()
     if args.action == "encode":
         if args.n_samples > 0:
             sample_text(
-                input_filepath,
-                sample_filepath,
+                text_filepath,
+                text_sample_filepath,
                 args.n_samples,
-                special_token,
+                split_special_token,
             )
-            input_filepath = sample_filepath
-        with open(input_filepath, "r") as f_in, open(output_filepath, "w") as f_out:
-            for output in tqdm(tokenizer.encode_iterable(f_in)):
-                f_out.write(str(output))
-                f_out.write(" ")
+            text_filepath = text_sample_filepath
+        with open(token_ids_filepath, "w") as f:
+            chunk_generator = tokenizer.encode_iterable(
+                generate_chunks(
+                    text_filepath,
+                    split_special_token,
+                )
+            )
+            for output in chunk_generator:
+                f.write(str(output))
+                f.write(" ")
+    elif args.action == "decode":
+        with open(token_ids_filepath, "r") as f:
+            token_ids = f.readline().split(" ")
+            token_ids = [int(s) for s in token_ids[:-1]]
+
+        decoded_text = tokenizer.decode(token_ids)
+        with open(decoded_text_filepath, "w") as f:
+            f.write(decoded_text)
     end_time = time()
     print(f"Total time: {end_time - start_time:.2f}")
