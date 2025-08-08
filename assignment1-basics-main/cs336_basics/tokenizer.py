@@ -1,6 +1,7 @@
 from __future__ import annotations
 import argparse
 import json
+import numpy as np
 import os
 import regex as re
 from collections import defaultdict
@@ -143,9 +144,14 @@ def generate_chunks(
     chunk_boundaries = find_chunk_boundaries(
         input_filepath,
         split_special_token.encode("utf-8"),
+        desired_num_chunks=100,
     )
     with open(input_filepath, "rb") as f:
-        for start, end in tqdm(zip(chunk_boundaries[:-1], chunk_boundaries[1:]), "Tokenizing"):
+        for start, end in tqdm(
+            zip(chunk_boundaries[:-1], chunk_boundaries[1:]),
+            total=len(chunk_boundaries)-1,
+            desc="Tokenizing",
+        ):
             f.seek(start)
             yield f.read(end - start).decode("utf-8")
 
@@ -163,7 +169,7 @@ if __name__ == "__main__":
     text_filepath = f"data/{args.input}.txt"
     text_sample_filepath = f"data/{args.input}-sample.txt"
     decoded_text_filepath = f"data/{args.input}-decoded.txt"
-    token_ids_filepath = f"data/{args.input}-token-ids.txt"
+    token_ids_filepath = f"data/{args.input}-token-ids.bin"
     split_special_token = "<|endoftext|>"
 
     tokenizer = Tokenizer.from_files(
@@ -182,21 +188,17 @@ if __name__ == "__main__":
                 split_special_token,
             )
             text_filepath = text_sample_filepath
-        with open(token_ids_filepath, "w") as f:
+        with open(token_ids_filepath, "wb") as f:
             chunk_generator = tokenizer.encode_iterable(
                 generate_chunks(
                     text_filepath,
                     split_special_token,
                 )
             )
-            for output in chunk_generator:
-                f.write(str(output))
-                f.write(" ")
+            token_ids = np.fromiter(chunk_generator, dtype=np.uint16)
+            f.write(token_ids.tobytes())
     elif args.action == "decode":
-        with open(token_ids_filepath, "r") as f:
-            token_ids = f.readline().split(" ")
-            token_ids = [int(s) for s in token_ids[:-1]]
-
+        token_ids = np.fromfile(token_ids_filepath, dtype=np.uint16)
         decoded_text = tokenizer.decode(token_ids)
         with open(decoded_text_filepath, "w") as f:
             f.write(decoded_text)
