@@ -22,7 +22,31 @@ class Linear(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return einsum(self._weights, x, "d_out d_in, ... d_in -> ... d_out")
 
+class Embedding(nn.Module):
+    def __init__(
+        self,
+        num_embeddings: int,
+        embedding_dim: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        initial_weights = torch.empty(
+            num_embeddings,
+            embedding_dim,
+            device=device,
+            dtype=dtype,
+        )
+        torch.nn.init.trunc_normal_(initial_weights, mean=0.0, std=1.0, a=-3.0, b=3.0)
+        self._weights = nn.Parameter(initial_weights)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self._weights[x]
+
 if __name__ == "__main__":
-    linear = Linear(2, 2)
-    state_dict = linear.state_dict()
-    print(state_dict)
+    embedding = Embedding(10, 2)
+    x = torch.LongTensor([0])
+    y = embedding(x)
+    print(f"Before backward: embedding._weigths.grad={embedding._weights.grad}")
+    y.sum().backward()
+    print(f"After backward: embedding._weigths.grad={embedding._weights.grad}")
