@@ -43,10 +43,28 @@ class Embedding(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self._weights[x]
 
+class RMSNorm(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        eps: float = 1e-5,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self._weights = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        in_dtype = x.dtype
+        x = x.to(torch.float32)
+        norm = (einsum(x**2, "... d_model -> ...") / x.shape[-1] + self.eps) ** 0.5
+        x = einsum(x, 1/norm,  self._weights, "... d_model, ..., d_model -> ... d_model")
+        x = x.to(in_dtype)
+        return x
+
+
 if __name__ == "__main__":
-    embedding = Embedding(10, 2)
-    x = torch.LongTensor([0])
-    y = embedding(x)
-    print(f"Before backward: embedding._weigths.grad={embedding._weights.grad}")
-    y.sum().backward()
-    print(f"After backward: embedding._weigths.grad={embedding._weights.grad}")
+    rms_norm = RMSNorm(3)
+    x = torch.ones((2, 2, 3))
+    print(rms_norm(x))
