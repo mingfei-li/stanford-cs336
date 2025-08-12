@@ -89,7 +89,47 @@ class SwiGLU(nn.Module):
         x = einsum(self.w2, x2, "d_model d_ff, ... d_ff -> ... d_model")
         return x
 
+class RotaryPositionalEmbedding(nn.Module):
+    def __init__(
+        self,
+        theta: float,
+        d_k: int,
+        max_seq_len: int,
+        device: torch.device | None = None,
+    ) -> None:
+        super().__init__()
+
+        theta_ik = einsum(
+            torch.arange(0, max_seq_len), 
+            theta ** (-torch.arange(0, d_k//2)*2 / d_k),
+            "i, k -> i k"
+        )
+        cos_ik = torch.cos(theta_ik)
+        sin_ik = torch.sin(theta_ik)
+        rotation_matrices = rearrange(
+            [cos_ik, -sin_ik, sin_ik, cos_ik],
+            "(h w) i k -> i k h w",
+            h=2,
+        )
+        self.register_buffer(
+            "rotation_matrices",
+            rotation_matrices,
+            persistent=False,
+        )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor,
+    ) -> torch.Tensor:
+        r = self.rotation_matrices[token_positions]
+
+        x = rearrange(x, "... t (g i) -> ... t g i", i=2)
+        x = einsum(r, x, "t g j i, ... t g i -> ... t g j")
+        x = rearrange(x, "... t g j -> ... t (g j)")
+
+        return x
+
 if __name__ == "__main__":
-    rms_norm = RMSNorm(3)
-    x = torch.ones((2, 2, 3))
-    print(rms_norm(x))
+    rope = RotaryPositionalEmbedding(4/torch.pi, 2, 5)
+    print(rope.rotation_matrices)
