@@ -63,6 +63,31 @@ class RMSNorm(nn.Module):
         x = x.to(in_dtype)
         return x
 
+class SwiGLU(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        d_ff = int(d_model * 8 / 3 / 64) * 64
+        std = (2 / (d_model + d_ff)) ** 0.5
+
+        self.w1 = nn.Parameter(torch.empty(d_ff, d_model, device=device, dtype=dtype))
+        self.w2 = nn.Parameter(torch.empty(d_model, d_ff, device=device, dtype=dtype))
+        self.w3 = nn.Parameter(torch.empty(d_ff, d_model, device=device, dtype=dtype))
+
+        torch.nn.init.normal_(self.w1.data, mean=0.0, std=std)
+        torch.nn.init.normal_(self.w2.data, mean=0.0, std=std)
+        torch.nn.init.normal_(self.w3.data, mean=0.0, std=std)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x1 = einsum(self.w1, x, "d_ff d_model, ... d_model -> ... d_ff")
+        x3 = einsum(self.w3, x, "d_ff d_model, ... d_model -> ... d_ff")
+        x2 = torch.sigmoid(x1) * x1 * x3
+        x = einsum(self.w2, x2, "d_model d_ff, ... d_ff -> ... d_model")
+        return x
 
 if __name__ == "__main__":
     rms_norm = RMSNorm(3)
