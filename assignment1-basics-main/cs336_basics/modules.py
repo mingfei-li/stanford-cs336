@@ -130,6 +130,13 @@ class RotaryPositionalEmbedding(nn.Module):
 
         return x
 
+def softmax(x: torch.Tensor, dim: int) -> None:
+    max_value, _ = x.max(dim=dim, keepdim=True)
+    x = x - max_value
+    x = x.exp()
+    x = x / x.sum(dim=dim, keepdim=True)
+    return x
+
 if __name__ == "__main__":
     rope = RotaryPositionalEmbedding(4/torch.pi, 2, 5)
     print(rope.rotation_matrices)
