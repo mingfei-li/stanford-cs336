@@ -137,6 +137,23 @@ def softmax(x: torch.Tensor, dim: int) -> None:
     x = x / x.sum(dim=dim, keepdim=True)
     return x
 
+def scaled_dot_product_attention(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    attention_scores = einsum(Q, K, "... i k, ... j k -> ... i j")
+    if mask is not None:
+        attention_scores = torch.masked_fill(
+            attention_scores,
+            ~mask,
+            float("-inf"),
+        )
+    attention_weights = softmax(attention_scores / (K.shape[-1] ** 0.5), -1)
+    out = einsum(attention_weights, V, "... i j, ... j k -> ... i k")
+    return out
+
 if __name__ == "__main__":
     rope = RotaryPositionalEmbedding(4/torch.pi, 2, 5)
     print(rope.rotation_matrices)
