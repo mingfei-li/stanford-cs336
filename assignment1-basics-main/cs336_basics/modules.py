@@ -125,7 +125,7 @@ class RotaryPositionalEmbedding(nn.Module):
         r = self.rotation_matrices[token_positions]
 
         x = rearrange(x, "... t (g i) -> ... t g i", i=2)
-        x = einsum(r, x, "t g j i, ... t g i -> ... t g j")
+        x = einsum(r, x, "... t g j i, ... t g i -> ... t g j")
         x = rearrange(x, "... t g j -> ... t (g j)")
 
         return x
@@ -153,6 +153,61 @@ def scaled_dot_product_attention(
     attention_weights = softmax(attention_scores / (K.shape[-1] ** 0.5), -1)
     out = einsum(attention_weights, V, "... i j, ... j k -> ... i k")
     return out
+
+class MultiHeadAttention(nn.Module):
+    def __init__(
+        self, 
+        d_model: int,
+        num_heads: int,
+        rope_embedding: RotaryPositionalEmbedding | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        std = (1 / d_model) ** 0.5
+        self.d_model = d_model
+        self.n_heads = num_heads
+        self.rope_emb = rope_embedding
+        self.q_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
+        self.k_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
+        self.v_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
+        self.o_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        token_positions: torch.Tensor | None = None
+    ) -> torch.Tensor: 
+        q = einsum(x, self.q_proj_weight, "... j, k j -> ... k")
+        k = einsum(x, self.k_proj_weight, "... j, k j -> ... k")
+        v = einsum(x, self.v_proj_weight, "... j, k j -> ... k")
+
+        q = rearrange(
+            q,
+            "... seq_len (n_heads d_head) -> ... n_heads seq_len d_head",
+            n_heads=self.n_heads,
+        )
+        k = rearrange(
+            k,
+            "... seq_len (n_heads d_head) -> ... n_heads seq_len d_head",
+            n_heads=self.n_heads,
+        )
+        v = rearrange(
+            v,
+            "... seq_len (n_heads d_head) -> ... n_heads seq_len d_head",
+            n_heads=self.n_heads,
+        )
+        if self.rope_emb is not None and token_positions is not None:
+            q = self.rope_emb(q, token_positions)
+            k = self.rope_emb(k, token_positions)
+        mask = torch.tril(torch.ones((x.shape[-2], x.shape[-2]))).bool()
+        out = scaled_dot_product_attention(q, k, v, mask)
+        out = rearrange(
+            out,
+            "... n_heads seq_len d_head -> ... seq_len (n_heads d_head)"
+        )
+        out = einsum(out, self.o_proj_weight, "... j, k j -> ... k")
+        return out
 
 if __name__ == "__main__":
     rope = RotaryPositionalEmbedding(4/torch.pi, 2, 5)
