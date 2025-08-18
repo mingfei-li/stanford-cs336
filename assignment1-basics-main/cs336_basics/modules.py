@@ -11,7 +11,7 @@ class Linear(nn.Module):
         dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
-        self._weights = nn.Parameter(
+        self.weight = nn.Parameter(
             torch.randn(
                 (out_features, in_features),
                 device=device,
@@ -20,7 +20,7 @@ class Linear(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return einsum(self._weights, x, "d_out d_in, ... d_in -> ... d_out")
+        return einsum(self.weight, x, "d_out d_in, ... d_in -> ... d_out")
 
 class Embedding(nn.Module):
     def __init__(
@@ -38,10 +38,10 @@ class Embedding(nn.Module):
             dtype=dtype,
         )
         torch.nn.init.trunc_normal_(initial_weights, mean=0.0, std=1.0, a=-3.0, b=3.0)
-        self._weights = nn.Parameter(initial_weights)
+        self.weight = nn.Parameter(initial_weights)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self._weights[x]
+        return self.weight[x]
 
 class RMSNorm(nn.Module):
     def __init__(
@@ -52,14 +52,14 @@ class RMSNorm(nn.Module):
         dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
-        self._weights = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
+        self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
         self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         in_dtype = x.dtype
         x = x.to(torch.float32)
         norm = (einsum(x**2, "... d_model -> ...") / x.shape[-1] + self.eps) ** 0.5
-        x = einsum(x, 1/norm,  self._weights, "... d_model, ..., d_model -> ... d_model")
+        x = einsum(x, 1/norm,  self.weight, "... d_model, ..., d_model -> ... d_model")
         x = x.to(in_dtype)
         return x
 
@@ -72,21 +72,15 @@ class SwiGLU(nn.Module):
     ) -> None:
         super().__init__()
         d_ff = int(d_model * 8 / 3 / 64) * 64
-        std = (2 / (d_model + d_ff)) ** 0.5
-
-        self.w1 = nn.Parameter(torch.empty(d_ff, d_model, device=device, dtype=dtype))
-        self.w2 = nn.Parameter(torch.empty(d_model, d_ff, device=device, dtype=dtype))
-        self.w3 = nn.Parameter(torch.empty(d_ff, d_model, device=device, dtype=dtype))
-
-        torch.nn.init.normal_(self.w1.data, mean=0.0, std=std)
-        torch.nn.init.normal_(self.w2.data, mean=0.0, std=std)
-        torch.nn.init.normal_(self.w3.data, mean=0.0, std=std)
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+        self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x1 = einsum(self.w1, x, "d_ff d_model, ... d_model -> ... d_ff")
-        x3 = einsum(self.w3, x, "d_ff d_model, ... d_model -> ... d_ff")
+        x1 = self.w1(x)
+        x3 = self.w3(x)
         x2 = torch.sigmoid(x1) * x1 * x3
-        x = einsum(self.w2, x2, "d_model d_ff, ... d_ff -> ... d_model")
+        x = self.w2(x2)
         return x
 
 class RotaryPositionalEmbedding(nn.Module):
@@ -154,7 +148,7 @@ def scaled_dot_product_attention(
     out = einsum(attention_weights, V, "... i j, ... j k -> ... i k")
     return out
 
-class MultiHeadAttention(nn.Module):
+class MultiHeadSelfAttention(nn.Module):
     def __init__(
         self, 
         d_model: int,
@@ -164,23 +158,22 @@ class MultiHeadAttention(nn.Module):
         dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
-        std = (1 / d_model) ** 0.5
         self.d_model = d_model
         self.n_heads = num_heads
         self.rope_emb = rope_embedding
-        self.q_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
-        self.k_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
-        self.v_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
-        self.o_proj_weight = nn.Parameter(torch.randn(d_model, d_model) * std)
+        self.q_proj = Linear(d_model, d_model, device, dtype)
+        self.k_proj = Linear(d_model, d_model, device, dtype)
+        self.v_proj = Linear(d_model, d_model, device, dtype)
+        self.o_proj = Linear(d_model, d_model, device, dtype)
 
     def forward(
         self,
         x: torch.Tensor,
         token_positions: torch.Tensor | None = None
     ) -> torch.Tensor: 
-        q = einsum(x, self.q_proj_weight, "... j, k j -> ... k")
-        k = einsum(x, self.k_proj_weight, "... j, k j -> ... k")
-        v = einsum(x, self.v_proj_weight, "... j, k j -> ... k")
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
 
         q = rearrange(
             q,
@@ -206,7 +199,7 @@ class MultiHeadAttention(nn.Module):
             out,
             "... n_heads seq_len d_head -> ... seq_len (n_heads d_head)"
         )
-        out = einsum(out, self.o_proj_weight, "... j, k j -> ... k")
+        out = self.o_proj(out)
         return out
 
 if __name__ == "__main__":

@@ -11,7 +11,16 @@ from torch import Tensor
 
 from cs336_basics.train_bpe import train_bpe
 from cs336_basics.tokenizer import Tokenizer
-from cs336_basics.modules import Linear, Embedding, RMSNorm, SwiGLU, RotaryPositionalEmbedding, softmax, scaled_dot_product_attention, MultiHeadAttention
+from cs336_basics.modules import (
+    Linear,
+    Embedding,
+    RMSNorm,
+    SwiGLU,
+    RotaryPositionalEmbedding,
+    softmax,
+    scaled_dot_product_attention,
+    MultiHeadSelfAttention,
+)
 
 def run_linear(
     d_in: int,
@@ -33,7 +42,7 @@ def run_linear(
     """
 
     linear = Linear(d_in, d_out)
-    linear.load_state_dict({"_weights": weights})
+    linear.load_state_dict({"weight": weights})
     return linear(in_features)
 
 
@@ -57,7 +66,7 @@ def run_embedding(
     """
 
     embedding = Embedding(vocab_size, d_model)
-    embedding.load_state_dict({"_weights": weights})
+    embedding.load_state_dict({"weight": weights})
     return embedding(token_ids)
 
 
@@ -93,9 +102,9 @@ def run_swiglu(
 
     swiglu = SwiGLU(d_model)
     swiglu.load_state_dict({
-        "w1": w1_weight,
-        "w2": w2_weight,
-        "w3": w3_weight,
+        "w1.weight": w1_weight,
+        "w2.weight": w2_weight,
+        "w3.weight": w3_weight,
     })
     return swiglu(in_features)
 
@@ -152,12 +161,12 @@ def run_multihead_self_attention(
         Float[Tensor, " ... sequence_length d_out"]: Tensor with the output of running your optimized, batched multi-headed attention
         implementation with the given QKV projection weights and input features.
     """
-    mha = MultiHeadAttention(d_model, num_heads)
+    mha = MultiHeadSelfAttention(d_model, num_heads)
     mha.load_state_dict({
-        "q_proj_weight": q_proj_weight,
-        "k_proj_weight": k_proj_weight,
-        "v_proj_weight": v_proj_weight,
-        "o_proj_weight": o_proj_weight,
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "o_proj.weight": o_proj_weight,
     })
     return mha(in_features)
 
@@ -201,12 +210,12 @@ def run_multihead_self_attention_with_rope(
     """
     d_head = d_model // num_heads
     rope_emb = RotaryPositionalEmbedding(theta, d_head, max_seq_len)
-    mha = MultiHeadAttention(d_model, num_heads, rope_emb)
+    mha = MultiHeadSelfAttention(d_model, num_heads, rope_emb)
     mha.load_state_dict({
-        "q_proj_weight": q_proj_weight,
-        "k_proj_weight": k_proj_weight,
-        "v_proj_weight": v_proj_weight,
-        "o_proj_weight": o_proj_weight,
+        "q_proj.weight": q_proj_weight,
+        "k_proj.weight": k_proj_weight,
+        "v_proj.weight": v_proj_weight,
+        "o_proj.weight": o_proj_weight,
     })
     return mha(in_features, token_positions.view(-1))
 
@@ -410,7 +419,7 @@ def run_rmsnorm(
         RMSNorm of the `in_features`.
     """
     rms_norm = RMSNorm(d_model, eps)
-    rms_norm.load_state_dict({"_weights": weights})
+    rms_norm.load_state_dict({"weight": weights})
     return rms_norm(in_features)
 
 
