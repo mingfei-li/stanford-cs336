@@ -29,8 +29,7 @@ def pretokenize_chunk(
     with open(input_path, "rb") as f:
         f.seek(start)
         chunk = f.read(end - start).decode("utf-8")
-    escaped_special_tokens = [token.replace("|", r"\|") for token in special_tokens]
-    documents = re.split("|".join(escaped_special_tokens), chunk)
+    documents = re.split("|".join(map(re.escape, special_tokens)), chunk)
     pretoken_counts = defaultdict(int)
     for doc in documents:
         for match in PRETOKENIZATION_PATTERN.finditer(doc):
