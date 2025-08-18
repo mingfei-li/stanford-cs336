@@ -47,9 +47,9 @@ class RMSNorm(nn.Module):
     def __init__(
         self,
         d_model: int,
-        eps: float = 1e-5,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
+        eps: float = 1e-5,
     ) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.ones(d_model, device=device, dtype=dtype))
@@ -67,11 +67,13 @@ class SwiGLU(nn.Module):
     def __init__(
         self,
         d_model: int,
+        d_ff: int | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
-        d_ff = int(d_model * 8 / 3 / 64) * 64
+        if d_ff is None:
+            d_ff = int(d_model * 8 / 3 / 64) * 64
         self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
         self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
         self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
@@ -164,13 +166,14 @@ class MultiHeadSelfAttention(nn.Module):
         self.q_proj = Linear(d_model, d_model, device, dtype)
         self.k_proj = Linear(d_model, d_model, device, dtype)
         self.v_proj = Linear(d_model, d_model, device, dtype)
-        self.o_proj = Linear(d_model, d_model, device, dtype)
+        self.output_proj = Linear(d_model, d_model, device, dtype)
 
     def forward(
         self,
         x: torch.Tensor,
         token_positions: torch.Tensor | None = None
     ) -> torch.Tensor: 
+        seq_len = x.shape[-2]
         q = self.q_proj(x)
         k = self.k_proj(x)
         v = self.v_proj(x)
@@ -190,17 +193,43 @@ class MultiHeadSelfAttention(nn.Module):
             "... seq_len (n_heads d_head) -> ... n_heads seq_len d_head",
             n_heads=self.n_heads,
         )
-        if self.rope_emb is not None and token_positions is not None:
+        if self.rope_emb is not None:
+            if token_positions is None:
+                token_positions = torch.arange(0, seq_len)
             q = self.rope_emb(q, token_positions)
             k = self.rope_emb(k, token_positions)
-        mask = torch.tril(torch.ones((x.shape[-2], x.shape[-2]))).bool()
+        mask = torch.tril(torch.ones((seq_len, seq_len))).bool()
         out = scaled_dot_product_attention(q, k, v, mask)
         out = rearrange(
             out,
             "... n_heads seq_len d_head -> ... seq_len (n_heads d_head)"
         )
-        out = self.o_proj(out)
+        out = self.output_proj(out)
         return out
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        d_ff: int,
+        max_seq_len: int,
+        theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        d_head = d_model // num_heads
+        rope_emb = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
+        self.ln1 = RMSNorm(d_model, device, dtype)
+        self.attn = MultiHeadSelfAttention(d_model, num_heads, rope_emb, device, dtype)
+        self.ln2 = RMSNorm(d_model, device, dtype)
+        self.ffn = SwiGLU(d_model, d_ff, device, dtype)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
+        return x
 
 if __name__ == "__main__":
     rope = RotaryPositionalEmbedding(4/torch.pi, 2, 5)
