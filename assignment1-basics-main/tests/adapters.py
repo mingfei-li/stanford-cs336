@@ -21,6 +21,7 @@ from cs336_basics.modules import (
     scaled_dot_product_attention,
     MultiHeadSelfAttention,
     TransformerBlock,
+    TransformerLM,
 )
 
 def run_linear(
@@ -398,7 +399,17 @@ def run_transformer_lm(
         Float[Tensor, "batch_size sequence_length vocab_size"]: Tensor with the predicted unnormalized
         next-word distribution for each token.
     """
-    raise NotImplementedError
+    transformer_lm = TransformerLM(
+        vocab_size,
+        context_length,
+        d_model,
+        num_layers,
+        num_heads,
+        d_ff,
+        rope_theta,
+    )
+    transformer_lm.load_state_dict(weights)
+    return transformer_lm(in_indices)
 
 
 def run_rmsnorm(

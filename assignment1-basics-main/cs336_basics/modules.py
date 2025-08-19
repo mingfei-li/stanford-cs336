@@ -231,6 +231,43 @@ class TransformerBlock(nn.Module):
         x = x + self.ffn(self.ln2(x))
         return x
 
+class TransformerLM(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        context_length: int,
+        d_model: int,
+        num_layers: int,
+        num_heads: int,
+        d_ff: int,
+        rope_theta: float,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        self.token_embeddings = Embedding(vocab_size, d_model)
+        self.layers = nn.ModuleList(
+            TransformerBlock(
+                d_model,
+                num_heads,
+                d_ff,
+                context_length,
+                rope_theta,
+                device,
+                dtype,
+            ) for _ in range(num_layers)
+        )
+        self.ln_final = RMSNorm(d_model, device, dtype)
+        self.lm_head = Linear(d_model, vocab_size)
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.token_embeddings(x)
+        for layer in self.layers:
+            x = layer(x)
+        x = self.ln_final(x)
+        x = self.lm_head(x)
+        return x
+
 if __name__ == "__main__":
     rope = RotaryPositionalEmbedding(4/torch.pi, 2, 5)
     print(rope.rotation_matrices)
