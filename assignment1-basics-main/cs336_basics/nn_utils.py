@@ -1,6 +1,6 @@
 import math
 import torch
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable
 
 def cross_entropy(logits: torch.Tensor, targets: torch.Tensor):
     max_logits, _ = logits.max(dim=-1, keepdim=True)
@@ -12,7 +12,7 @@ def cross_entropy(logits: torch.Tensor, targets: torch.Tensor):
 class AdamW(torch.optim.Optimizer):
     def __init__(
         self,
-        params: Iterator[torch.nn.Parameter],
+        params: Iterable[torch.nn.Parameter],
         lr: float,
         weight_decay: float,
         betas: tuple[float, float],
@@ -66,3 +66,24 @@ def get_lr_cosine_schedule(
         )
     else:
         return min_learning_rate
+
+def gradient_clipping(
+    parameters: Iterable[torch.nn.Parameter],
+    max_l2_norm: float,
+) -> None:
+    parameters = list(parameters)
+    grad_norm_squared = 0.
+    for param in parameters:
+        if param.grad is not None:
+            grad_norm_squared += (param.grad ** 2).sum()
+    multiplier = min(max_l2_norm / (grad_norm_squared ** 0.5 + 1e-6), 1.0)
+    for param in parameters:
+        if param.grad is not None:
+            param.grad *= multiplier
+
+if __name__ == "__main__":
+    model = torch.nn.Linear(5, 5)
+    x = torch.randn(10, 5)
+    loss = model(x).sum()
+    loss.backward()
+    gradient_clipping(model.parameters(), 1.0)
