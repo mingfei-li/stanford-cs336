@@ -25,9 +25,11 @@ from cs336_basics.model import (
 )
 from cs336_basics.nn_utils import (
     cross_entropy,
+    gradient_clipping,
+)
+from cs336_basics.optimizer import (
     AdamW,
     get_lr_cosine_schedule,
-    gradient_clipping,
 )
 
 def run_linear(
