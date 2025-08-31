@@ -1,0 +1,11 @@
+uv run -m cs336_basics.inference \
+    --tokenizer_vocab="tokenizer_data/TinyStoriesV2-GPT4-train.json" \
+    --tokenizer_merges="tokenizer_data/TinyStoriesV2-GPT4-train-merges.txt" \
+    --vocab_size=10000 --context_length=256 --d_model=512 --d_ff=1344 \
+    --rope_theta=10000 --n_layers=4 --n_heads=16 \
+    --special_token="<|endoftext|>" \
+    --prompt="Once upon a time" \
+    --model="checkpoints/TinyStoriesV2-GPT4-train-sample/model-99.pt" \
+    --device="mps" \
+    --max_len=100 \
+    --nucleus_sampling_threshold=0.5
