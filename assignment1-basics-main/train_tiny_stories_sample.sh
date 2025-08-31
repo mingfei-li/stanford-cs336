@@ -1,0 +1,9 @@
+uv run -m cs336_basics.train_model \
+    --dataset="data/TinyStoriesV2-GPT4-train-sample-token-ids.bin" \
+    --batch_size=10 --train_val_split=0.9 \
+    --vocab_size=10000 --context_length=256 --d_model=512 --d_ff=1344 \
+    --rope_theta=10000 --n_layers=4 --n_heads=16 --device="mps" \
+    --n_iters=100 --max_lr=0.001 --min_lr=0 --warmup_iters=10 \
+    --weight_decay=0.0001 --beta1=0.9 --beta2=0.999 --gradient_clipping=0.1\
+    --wandb_entity="ml_cs336" --wandb_project="test_training_loop" \
+    --log_every_k=1 --checkpoint_path="checkpoints/TinyStoriesV2-GPT4-train-sample"

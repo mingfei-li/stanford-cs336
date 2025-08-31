@@ -99,7 +99,7 @@ class RotaryPositionalEmbedding(nn.Module):
             torch.arange(0, max_seq_len), 
             theta ** (-torch.arange(0, d_k//2)*2 / d_k),
             "i, k -> i k"
-        )
+        ).to(device)
         cos_ik = torch.cos(theta_ik)
         sin_ik = torch.sin(theta_ik)
         rotation_matrices = rearrange(
@@ -167,6 +167,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.k_proj = Linear(d_model, d_model, device, dtype)
         self.v_proj = Linear(d_model, d_model, device, dtype)
         self.output_proj = Linear(d_model, d_model, device, dtype)
+        self.device = device
 
     def forward(
         self,
@@ -198,7 +199,7 @@ class MultiHeadSelfAttention(nn.Module):
                 token_positions = torch.arange(0, seq_len)
             q = self.rope_emb(q, token_positions)
             k = self.rope_emb(k, token_positions)
-        mask = torch.tril(torch.ones((seq_len, seq_len))).bool()
+        mask = torch.tril(torch.ones((seq_len, seq_len))).bool().to(self.device)
         out = scaled_dot_product_attention(q, k, v, mask)
         out = rearrange(
             out,
@@ -245,7 +246,7 @@ class TransformerLM(nn.Module):
         dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
-        self.token_embeddings = Embedding(vocab_size, d_model)
+        self.token_embeddings = Embedding(vocab_size, d_model, device, dtype)
         self.layers = nn.ModuleList(
             TransformerBlock(
                 d_model,
@@ -258,7 +259,7 @@ class TransformerLM(nn.Module):
             ) for _ in range(num_layers)
         )
         self.ln_final = RMSNorm(d_model, device, dtype)
-        self.lm_head = Linear(d_model, vocab_size)
+        self.lm_head = Linear(d_model, vocab_size, device, dtype)
     
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.token_embeddings(x)

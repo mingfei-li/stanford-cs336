@@ -2,6 +2,7 @@ import argparse
 import numpy as np
 import numpy.typing as npt
 import os
+import torch
 import wandb
 from tqdm import tqdm
 
@@ -15,6 +16,18 @@ def get_dataset(filepath: str | os.PathLike) -> npt.NDArray:
     filesize = os.path.getsize(filepath)
     dataset_size = filesize // np.dtype(np.uint16).itemsize
     return np.memmap(filepath, dtype=np.uint16, shape=(dataset_size,))
+
+def get_val_loss(model, val_dataset, args):
+    x, y = get_batch(
+        val_dataset,
+        args.batch_size,
+        args.context_length,
+        args.device,
+    )
+    with torch.no_grad():
+        logits = model(x)
+        loss = cross_entropy(logits, y)
+    return loss
 
 def train(args: argparse.Namespace):
     run = wandb.init(
@@ -40,7 +53,7 @@ def train(args: argparse.Namespace):
     )
     optimizer = AdamW(
         model.parameters(),
-        args.lr,
+        args.max_lr,
         args.weight_decay,
         (args.beta1, args.beta2),
     )
@@ -65,14 +78,14 @@ def train(args: argparse.Namespace):
         for group in optimizer.param_groups:
             group["lr"] = lr
 
-        optimzer.zero_grad()
+        optimizer.zero_grad()
         loss.backward()
-        gradient_clipping(model.parameters())
+        gradient_clipping(model.parameters(), args.gradient_clipping)
         optimizer.step()
 
         if t % args.log_every_k == 0:
-            val_loss = get_val_loss(model, val_dataset)
-            run.log({"train_loss": loss.item(), "val_loss": val_loss.item()}, step=t)
+            val_loss = get_val_loss(model, val_dataset, args)
+            run.log({"train_loss": loss.item(), "val_loss": val_loss.item(), "lr": lr}, step=t)
             save_checkpoint(
                 model,
                 optimizer,
@@ -86,34 +99,35 @@ if __name__ == "__main__":
 
     # data
     parser.add_argument("--dataset")
-    parser.add_argument("--batch_size")
-    parser.add_argument("--train_val_split")
+    parser.add_argument("--batch_size", type=int)
+    parser.add_argument("--train_val_split", type=float)
 
     # model hyper parameters
-    parser.add_argument("--vocab_size")
-    parser.add_argument("--context_length")
-    parser.add_argument("--d_model")
-    parser.add_argument("--d_ff")
-    parser.add_argument("--rope_theta")
-    parser.add_argument("--n_layers")
-    parser.add_argument("--n_heads")
+    parser.add_argument("--vocab_size", type=int)
+    parser.add_argument("--context_length", type=int)
+    parser.add_argument("--d_model", type=int)
+    parser.add_argument("--d_ff", type=int)
+    parser.add_argument("--rope_theta", type=float)
+    parser.add_argument("--n_layers", type=int)
+    parser.add_argument("--n_heads", type=int)
     parser.add_argument("--device", default="cpu")
 
     # learning schedule
-    parser.add_argument("--n_iters")
-    parser.add_argument("--max_lr")
-    parser.add_argument("--min_lr")
-    parser.add_argument("--warmup_iters")
+    parser.add_argument("--n_iters", type=int)
+    parser.add_argument("--max_lr", type=float)
+    parser.add_argument("--min_lr", type=float)
+    parser.add_argument("--warmup_iters", type=int)
 
     # optimizer hyper parameters
-    parser.add_argument("--weight_decay")
-    parser.add_argument("--beta1")
-    parser.add_argument("--beta2")
+    parser.add_argument("--weight_decay", type=float)
+    parser.add_argument("--beta1", type=float)
+    parser.add_argument("--beta2", type=float)
+    parser.add_argument("--gradient_clipping", type=float)
 
     # wandb setting
     parser.add_argument("--wandb_entity")
     parser.add_argument("--wandb_project")
-    parser.add_argument("--log_every_k")
+    parser.add_argument("--log_every_k", type=int)
 
     # checkpoint
     parser.add_argument("--checkpoint_path")

@@ -170,6 +170,7 @@ if __name__ == "__main__":
     text_sample_filepath = f"data/{args.input}-sample.txt"
     decoded_text_filepath = f"data/{args.input}-decoded.txt"
     token_ids_filepath = f"data/{args.input}-token-ids.bin"
+    sample_token_ids_filepath = f"data/{args.input}-sample-token-ids.bin"
     split_special_token = "<|endoftext|>"
 
     tokenizer = Tokenizer.from_files(
@@ -188,6 +189,7 @@ if __name__ == "__main__":
                 split_special_token,
             )
             text_filepath = text_sample_filepath
+            token_ids_filepath = sample_token_ids_filepath
         with open(token_ids_filepath, "wb") as f:
             chunk_generator = tokenizer.encode_iterable(
                 generate_chunks(

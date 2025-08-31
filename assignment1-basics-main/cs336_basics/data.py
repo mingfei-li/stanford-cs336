@@ -15,5 +15,5 @@ def get_batch(
         (batch_size, 1),
     )
     indices = starting_indices + np.arange(context_length+1).reshape(1, -1)
-    sample = torch.tensor(dataset[indices], device=device)
+    sample = torch.tensor(dataset[indices], device=device, dtype=torch.int64)
     return sample[:,:-1], sample[:,1:]
