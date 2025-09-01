@@ -33,8 +33,10 @@ def train(args: argparse.Namespace):
     run = wandb.init(
         entity=args.wandb_entity,
         project=args.wandb_project,
+        name=args.exp,
         config=vars(args)
     )
+    os.makedirs(os.path.join(args.checkpoint_path, args.exp), exist_ok=True)
 
     dataset = get_dataset(args.dataset)
     train_dataset_size = int(len(dataset) * args.train_val_split)
@@ -90,7 +92,7 @@ def train(args: argparse.Namespace):
                 model,
                 optimizer,
                 t,
-                os.path.join(args.checkpoint_path, f"model-{t}.pt"),
+                os.path.join(args.checkpoint_path, args.exp, f"model-{t}.pt"),
             )
     run.finish()
 
@@ -128,6 +130,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_entity")
     parser.add_argument("--wandb_project")
     parser.add_argument("--log_every_k", type=int)
+    parser.add_argument("--exp", default=None)
 
     # checkpoint
     parser.add_argument("--checkpoint_path")
