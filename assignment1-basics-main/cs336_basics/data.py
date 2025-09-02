@@ -11,7 +11,7 @@ def get_batch(
 ) -> tuple[torch.Tensor, torch.Tensor]:
     starting_indices = np.random.randint(
         0,
-        len(dataset) - context_length - 1,
+        len(dataset) - context_length,
         (batch_size, 1),
     )
     indices = starting_indices + np.arange(context_length+1).reshape(1, -1)

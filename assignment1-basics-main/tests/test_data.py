@@ -35,8 +35,8 @@ def test_get_batch():
 
     # Make sure we never sample an invalid start index
     num_possible_starting_indices = len(dataset) - context_length
-    assert max(starting_indices) <= num_possible_starting_indices - 1
-    assert min(starting_indices) >= 0
+    assert max(starting_indices) == num_possible_starting_indices - 1
+    assert min(starting_indices) == 0
     # Expected # of times that we see each starting index
     expected_count = (num_iters * batch_size) / num_possible_starting_indices
     standard_deviation = math.sqrt(
