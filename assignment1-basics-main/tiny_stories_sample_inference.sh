@@ -4,8 +4,8 @@ uv run -m cs336_basics.inference \
     --vocab_size=10000 --context_length=256 --d_model=512 --d_ff=1344 \
     --rope_theta=10000 --n_layers=4 --n_heads=16 \
     --special_token="<|endoftext|>" \
-    --prompt="Once upon a time" \
-    --model="checkpoints/TinyStoriesV2-GPT4-train-sample/model-99.pt" \
+    --prompt=$'\nOnce upon a time' \
+    --model="checkpoints/TinyStoriesV2-GPT4-train-sample/test-overfit-1-batch/model-49.pt" \
     --device="mps" \
-    --max_len=100 \
-    --nucleus_sampling_threshold=0.5
+    --temperature=0 \
+    --max_len=100

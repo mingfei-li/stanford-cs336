@@ -46,7 +46,7 @@ def generate_completion(
         if nucleus_sampling_threshold is not None:
             next_token = nucleus_sample(logits[-1], nucleus_sampling_threshold)
         else:
-            next_token = sample(logits[-1],temperature)
+            next_token = sample(logits[-1], temperature)
         x = torch.cat([x, torch.tensor([next_token], device=device)])
 
     return x.tolist()

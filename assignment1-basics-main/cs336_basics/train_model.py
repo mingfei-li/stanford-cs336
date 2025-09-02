@@ -38,10 +38,8 @@ def train(args: argparse.Namespace):
     )
     os.makedirs(os.path.join(args.checkpoint_path, args.exp), exist_ok=True)
 
-    dataset = get_dataset(args.dataset)
-    train_dataset_size = int(len(dataset) * args.train_val_split)
-    train_dataset = dataset[:train_dataset_size]
-    val_dataset = dataset[train_dataset_size:]
+    train_dataset = get_dataset(args.train_dataset)
+    val_dataset = get_dataset(args.val_dataset)
 
     model = TransformerLM(
         args.vocab_size,
@@ -100,7 +98,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # data
-    parser.add_argument("--dataset")
+    parser.add_argument("--train_dataset")
+    parser.add_argument("--val_dataset")
     parser.add_argument("--batch_size", type=int)
     parser.add_argument("--train_val_split", type=float)
 
