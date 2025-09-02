@@ -7,5 +7,6 @@ uv run -m cs336_basics.train_model \
     --n_iters=50 --max_lr=0.01 --min_lr=0 --warmup_iters=10 \
     --weight_decay=0.01 --beta1=0.9 --beta2=0.999 --gradient_clipping=1.0\
     --wandb_entity="ml_cs336" --wandb_project="test_training_loop" \
-    --log_every_k=1 --checkpoint_path="checkpoints/TinyStoriesV2-GPT4-train-sample" \
+    --log_every_k=1 \
+    --checkpoint_every_k=10 --checkpoint_path="checkpoints/TinyStoriesV2-GPT4-train-sample" \
     --exp="test-overfit-1-batch"

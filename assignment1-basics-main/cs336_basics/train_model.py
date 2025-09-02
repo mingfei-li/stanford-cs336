@@ -86,12 +86,21 @@ def train(args: argparse.Namespace):
         if t % args.log_every_k == 0:
             val_loss = get_val_loss(model, val_dataset, args)
             run.log({"train_loss": loss.item(), "val_loss": val_loss.item(), "lr": lr}, step=t)
+        
+        if t % args.checkpoint_every_k == 0:
             save_checkpoint(
                 model,
                 optimizer,
                 t,
                 os.path.join(args.checkpoint_path, args.exp, f"model-{t}.pt"),
             )
+
+    save_checkpoint(
+        model,
+        optimizer,
+        t,
+        os.path.join(args.checkpoint_path, args.exp, f"model-final.pt"),
+    )
     run.finish()
 
 if __name__ == "__main__":
@@ -130,6 +139,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb_project")
     parser.add_argument("--log_every_k", type=int)
     parser.add_argument("--exp", default=None)
+    parser.add_argument("--checkpoint_every_k", type=int)
 
     # checkpoint
     parser.add_argument("--checkpoint_path")
