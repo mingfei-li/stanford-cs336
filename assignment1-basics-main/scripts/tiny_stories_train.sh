@@ -1,0 +1,10 @@
+uv run -m cs336_basics.train_model \
+    --train_dataset="data/TinyStoriesV2-GPT4-train-token-ids.bin" \
+    --val_dataset="data/TinyStoriesV2-GPT4-valid-token-ids.bin" \
+    --vocab_size=10000 --context_length=256 --d_model=512 --d_ff=1344 \
+    --rope_theta=10000 --n_layers=4 --n_heads=16 --device="cuda" \
+    --batch_size=128 --n_iters=1000 --max_lr=0.001 --min_lr=0 --warmup_iters=50 \
+    --weight_decay=0.01 --beta1=0.9 --beta2=0.999 --gradient_clipping=1.0\
+    --wandb_entity="ml_cs336" --wandb_project="tiny_stories_learning_rate" \
+    --log_every_k=1 --checkpoint_path="checkpoints/tiny_stories_learning_rate" \
+    --exp="lr=1e-3"
