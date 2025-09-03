@@ -37,6 +37,7 @@ def train(args: argparse.Namespace):
         config=vars(args)
     )
     os.makedirs(os.path.join(args.checkpoint_path, args.exp), exist_ok=True)
+    best_val_loss = float("inf")
 
     train_dataset = get_dataset(args.train_dataset)
     val_dataset = get_dataset(args.val_dataset)
@@ -87,20 +88,14 @@ def train(args: argparse.Namespace):
             val_loss = get_val_loss(model, val_dataset, args)
             run.log({"train_loss": loss.item(), "val_loss": val_loss.item(), "lr": lr}, step=t)
         
-        if t % args.checkpoint_every_k == 0:
-            save_checkpoint(
-                model,
-                optimizer,
-                t,
-                os.path.join(args.checkpoint_path, args.exp, f"model-{t}.pt"),
-            )
-
-    save_checkpoint(
-        model,
-        optimizer,
-        t,
-        os.path.join(args.checkpoint_path, args.exp, f"model-final.pt"),
-    )
+            if val_loss.item() < best_val_loss:
+                best_val_loss = val_loss.item()
+                save_checkpoint(
+                    model,
+                    optimizer,
+                    t,
+                    os.path.join(args.checkpoint_path, args.exp, f"model-{t}.pt"),
+                )
     run.finish()
 
 if __name__ == "__main__":

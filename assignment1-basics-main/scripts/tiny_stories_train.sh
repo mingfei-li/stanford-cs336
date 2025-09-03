@@ -7,5 +7,5 @@ uv run -m cs336_basics.train_model \
     --weight_decay=0.01 --beta1=0.9 --beta2=0.999 --gradient_clipping=1.0\
     --wandb_entity="ml_cs336" --wandb_project="tiny_stories_learning_rate" \
     --log_every_k=10 \
-    --checkpoint_every_k=1000 --checkpoint_path="checkpoints/tiny_stories_learning_rate" \
+    --checkpoint_path="checkpoints/tiny_stories_learning_rate" \
     --exp="lr=1e-3"
