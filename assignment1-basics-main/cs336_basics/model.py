@@ -228,8 +228,10 @@ class TransformerBlock(nn.Module):
         self.ffn = SwiGLU(d_model, d_ff, device, dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = x + self.attn(self.ln1(x))
-        x = x + self.ffn(self.ln2(x))
+        # x = x + self.attn(self.ln1(x))
+        # x = x + self.ffn(self.ln2(x))
+        x = x + self.attn(x)
+        x = x + self.ffn(x)
         return x
 
 class TransformerLM(nn.Module):
@@ -265,7 +267,7 @@ class TransformerLM(nn.Module):
         x = self.token_embeddings(x)
         for layer in self.layers:
             x = layer(x)
-        x = self.ln_final(x)
+        # x = self.ln_final(x)
         x = self.lm_head(x)
         return x
 
