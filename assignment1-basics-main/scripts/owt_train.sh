@@ -1,0 +1,11 @@
+uv run -m cs336_basics.train_model \
+    --train_dataset="data/owt_train-token-ids.bin" \
+    --val_dataset="data/owt_valid-token-ids.bin" \
+    --vocab_size=32000 --context_length=256 --d_model=512 --d_ff=1344 \
+    --rope_theta=10000 --n_layers=4 --n_heads=16 --device="cuda" \
+    --batch_size=256 --n_iters=5000 --max_lr=0.01 --min_lr=0 --warmup_iters=250 \
+    --weight_decay=0.01 --beta1=0.9 --beta2=0.999 --gradient_clipping=1.0\
+    --wandb_entity="ml_cs336" --wandb_project="owt_exp" \
+    --log_every_k=10 \
+    --checkpoint_path="checkpoints/owt_exp" \
+    --exp="tiny_stories_setting"

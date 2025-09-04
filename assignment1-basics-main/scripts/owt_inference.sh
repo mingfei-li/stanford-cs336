@@ -1,0 +1,11 @@
+uv run -m cs336_basics.inference \
+    --tokenizer_vocab="tokenizer_data/owt_train.json" \
+    --tokenizer_merges="tokenizer_data/owt_train-merges.txt" \
+    --vocab_size=32000 --context_length=256 --d_model=512 --d_ff=1344 \
+    --rope_theta=10000 --n_layers=4 --n_heads=16 \
+    --special_token="<|endoftext|>" \
+    --prompt=$'\n' \
+    --model="checkpoints/owt_exp/tiny_stories_setting/model.pt" \
+    --device="cuda" \
+    --temperature=0 \
+    --max_len=100

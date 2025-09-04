@@ -94,7 +94,7 @@ def train(args: argparse.Namespace):
                     model,
                     optimizer,
                     t,
-                    os.path.join(args.checkpoint_path, args.exp, f"model-{t}.pt"),
+                    os.path.join(args.checkpoint_path, args.exp, f"model.pt"),
                 )
     run.finish()
 
