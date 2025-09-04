@@ -223,15 +223,14 @@ class TransformerBlock(nn.Module):
         d_head = d_model // num_heads
         rope_emb = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
         self.ln1 = RMSNorm(d_model, device, dtype)
-        self.attn = MultiHeadSelfAttention(d_model, num_heads, rope_emb, device, dtype)
+        # self.attn = MultiHeadSelfAttention(d_model, num_heads, rope_emb, device, dtype)
+        self.attn = MultiHeadSelfAttention(d_model, num_heads, device=device, dtype=dtype)
         self.ln2 = RMSNorm(d_model, device, dtype)
         self.ffn = SwiGLU(d_model, d_ff, device, dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # x = x + self.attn(self.ln1(x))
-        # x = x + self.ffn(self.ln2(x))
-        x = self.ln1(x + self.attn(x))
-        x = self.ln2(x + self.ffn(x))
+        x = x + self.attn(self.ln1(x))
+        x = x + self.ffn(self.ln2(x))
         return x
 
 class TransformerLM(nn.Module):
@@ -267,7 +266,7 @@ class TransformerLM(nn.Module):
         x = self.token_embeddings(x)
         for layer in self.layers:
             x = layer(x)
-        # x = self.ln_final(x)
+        x = self.ln_final(x)
         x = self.lm_head(x)
         return x
 
