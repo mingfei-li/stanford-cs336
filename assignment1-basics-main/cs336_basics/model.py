@@ -63,6 +63,9 @@ class RMSNorm(nn.Module):
         x = x.to(in_dtype)
         return x
 
+def silu(x: torch.Tensor) -> torch.Tensor:
+    return torch.sigmoid(x) * x
+
 class SwiGLU(nn.Module):
     def __init__(
         self,
@@ -79,11 +82,26 @@ class SwiGLU(nn.Module):
         self.w3 = Linear(d_model, d_ff, device=device, dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x1 = self.w1(x)
-        x3 = self.w3(x)
-        x2 = torch.sigmoid(x1) * x1 * x3
-        x = self.w2(x2)
+        x = silu(self.w1(x)) * self.w3(x)
+        x = self.w2(x)
         return x
+
+class SiLU(nn.Module):
+    def __init__(
+        self,
+        d_model: int,
+        d_ff: int | None = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ) -> None:
+        super().__init__()
+        if d_ff is None:
+            d_ff = d_model * 4
+        self.w1 = Linear(d_model, d_ff, device=device, dtype=dtype)
+        self.w2 = Linear(d_ff, d_model, device=device, dtype=dtype)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return silu(x)
 
 class RotaryPositionalEmbedding(nn.Module):
     def __init__(
@@ -223,10 +241,9 @@ class TransformerBlock(nn.Module):
         d_head = d_model // num_heads
         rope_emb = RotaryPositionalEmbedding(theta, d_head, max_seq_len, device)
         self.ln1 = RMSNorm(d_model, device, dtype)
-        # self.attn = MultiHeadSelfAttention(d_model, num_heads, rope_emb, device, dtype)
-        self.attn = MultiHeadSelfAttention(d_model, num_heads, device=device, dtype=dtype)
+        self.attn = MultiHeadSelfAttention(d_model, num_heads, rope_emb, device, dtype)
         self.ln2 = RMSNorm(d_model, device, dtype)
-        self.ffn = SwiGLU(d_model, d_ff, device, dtype)
+        self.ffn = SiLU(d_model, d_ff, device, dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.ln1(x))
