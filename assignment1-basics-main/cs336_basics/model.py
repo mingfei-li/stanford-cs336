@@ -243,7 +243,7 @@ class TransformerBlock(nn.Module):
         self.ln1 = RMSNorm(d_model, device, dtype)
         self.attn = MultiHeadSelfAttention(d_model, num_heads, rope_emb, device, dtype)
         self.ln2 = RMSNorm(d_model, device, dtype)
-        self.ffn = SiLU(d_model, d_ff, device, dtype)
+        self.ffn = SiLU(d_model, device=device, dtype=dtype)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.ln1(x))
