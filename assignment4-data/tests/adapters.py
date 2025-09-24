@@ -12,6 +12,7 @@ from cs336_data.pii import (
 )
 from cs336_data.quality import gopher_quality_filter
 from cs336_data.toxicity import classify_nsfw, classify_toxic_speech
+from cs336_data.deduplication import exact_line_deduplication
 
 def run_extract_text_from_html_bytes(html_bytes: bytes) -> str | None:
     return extract_text_from_html_bytes(html_bytes)
@@ -52,7 +53,7 @@ def run_gopher_quality_filter(text: str) -> bool:
 def run_exact_line_deduplication(
     input_files: list[os.PathLike], output_directory: os.PathLike
 ):
-    raise NotImplementedError
+    exact_line_deduplication(input_files, output_directory)
 
 
 def run_minhash_deduplication(
