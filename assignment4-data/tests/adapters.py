@@ -10,6 +10,7 @@ from cs336_data.pii import (
     mask_phone_numbers,
     mask_ips,
 )
+from cs336_data.quality import gopher_quality_filter
 from cs336_data.toxicity import classify_nsfw, classify_toxic_speech
 
 def run_extract_text_from_html_bytes(html_bytes: bytes) -> str | None:
@@ -45,7 +46,7 @@ def run_classify_quality(text: str) -> tuple[Any, float]:
 
 
 def run_gopher_quality_filter(text: str) -> bool:
-    raise NotImplementedError
+    return gopher_quality_filter(text)
 
 
 def run_exact_line_deduplication(
