@@ -14,7 +14,7 @@ def exact_line_deduplication(
     for input_file in input_files:
         with open(input_file, "r") as f_in:
             for line in f_in:
-                sha256 = hashlib.sha256(line.encode("utf-8")).hexdigest()
+                sha256 = hashlib.sha256(line.encode("utf-8")).digest()
                 line_counts[sha256] += 1
     
     for input_file in input_files:
@@ -24,7 +24,7 @@ def exact_line_deduplication(
         )
         with open(input_file, "r") as f_in, open(output_file, "w") as f_out:
             for line in f_in:
-                sha256 = hashlib.sha256(line.encode("utf-8")).hexdigest()
+                sha256 = hashlib.sha256(line.encode("utf-8")).digest()
                 if line_counts[sha256] == 1:
                     f_out.write(line)
 
