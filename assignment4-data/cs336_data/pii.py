@@ -1,5 +1,4 @@
 import argparse
-import fasttext
 import gzip
 import random
 import regex as re

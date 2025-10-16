@@ -1,5 +1,4 @@
 import argparse
-import fasttext
 import gzip
 import nltk
 import numpy as np
