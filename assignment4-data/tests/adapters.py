@@ -11,6 +11,7 @@ from cs336_data.pii import (
     mask_ips,
 )
 from cs336_data.quality import gopher_quality_filter
+from cs336_data.quality_classifier import classify_quality
 from cs336_data.toxicity import classify_nsfw, classify_toxic_speech
 from cs336_data.deduplication import (
     exact_line_deduplication,
@@ -46,7 +47,7 @@ def run_classify_toxic_speech(text: str) -> tuple[Any, float]:
 
 
 def run_classify_quality(text: str) -> tuple[Any, float]:
-    raise NotImplementedError
+    return classify_quality(text)
 
 
 def run_gopher_quality_filter(text: str) -> bool:
