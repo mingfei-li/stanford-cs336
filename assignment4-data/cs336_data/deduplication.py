@@ -5,19 +5,22 @@ import shutil
 import unicodedata
 
 from collections import defaultdict
+from functools import partial
+from multiprocessing import Pool, cpu_count
+from tqdm import tqdm
 
 def exact_line_deduplication(
     input_files: list[os.PathLike],
     output_directory: os.PathLike,
 ) -> None:
     line_counts = defaultdict(int)
-    for input_file in input_files:
+    for input_file in tqdm(input_files):
         with open(input_file, "r") as f_in:
             for line in f_in:
                 sha256 = hashlib.sha256(line.encode("utf-8")).digest()
                 line_counts[sha256] += 1
     
-    for input_file in input_files:
+    for input_file in tqdm(input_files):
         output_file = os.path.join(
             output_directory,
             os.path.basename(input_file),
@@ -115,7 +118,10 @@ def jaccard_similarity(
     shingles2 = set(get_shingles(file_2, ngrams))
     intersect = shingles1 & shingles2
     union = shingles1 | shingles2
-    return len(intersect) / len(union)
+    if union:
+        return len(intersect) / len(union)
+    else:
+        return 0
     
 def minhash_deduplication(
     input_files: list[os.PathLike],
@@ -126,18 +132,26 @@ def minhash_deduplication(
     output_directory: os.PathLike,
 ):
     seeds = [random.randint(0, 2**64-1).to_bytes(8) for _ in range(num_hashes)]
-    signatures = [minhash_signature(file, seeds, ngrams) for file in input_files]
+    with Pool(cpu_count() - 1) as p:
+        signatures = list(tqdm(
+            p.imap(
+                partial(minhash_signature, seeds=seeds, ngrams=ngrams),
+                input_files,
+            ),
+            desc="signature",
+            total=len(input_files),
+        ))
 
     lsh_index = LSHIndex(num_bands)
-    for file, signature in zip(input_files, signatures):
+    for file, signature in tqdm(zip(input_files, signatures), "lsh"):
         lsh_index.add(signature, file)
 
     uf_set = UnionFind(input_files)
-    for file, signature in zip(input_files, signatures):
+    for file, signature in tqdm(zip(input_files, signatures), "merge"):
         for target in lsh_index.get(signature):
             if jaccard_similarity(file, target, ngrams) > jaccard_threshold:
                 uf_set.union(file, target)
     
-    for file in input_files:
+    for file in tqdm(input_files, "copy"):
         if uf_set.find(file) == file:
             shutil.copy(file, output_directory)
