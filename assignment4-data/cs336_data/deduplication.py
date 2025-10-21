@@ -30,6 +30,8 @@ def exact_line_deduplication(
                 sha256 = hashlib.sha256(line.encode("utf-8")).digest()
                 if line_counts[sha256] == 1:
                     f_out.write(line)
+        if os.path.getsize(output_file) == 0:
+            os.remove(output_file)
 
 def normalize(text: str) -> str:
     # nfd normalization

@@ -52,8 +52,7 @@ def filter_file(base_dir: os.PathLike, input_file: os.PathLike):
     os.makedirs(output_dir, exist_ok=True)
     with gzip.open(input_file, "rb") as f_in:
         for record in tqdm(ArchiveIterator(f_in), desc=filename):
-            html_bytes = record.reader.read()
-            text = extract_text_from_html_bytes(html_bytes)
+            text = record.reader.read().decode("utf-8")
             if not language_filter(text):
                 continue
             if not toxicty_filter(text):
@@ -64,6 +63,7 @@ def filter_file(base_dir: os.PathLike, input_file: os.PathLike):
                 continue
             text = redact_pii(text)
 
+            assert text
             out_path = os.path.join(output_dir, f"{filename}.out{count}.txt")
             with open(out_path, "w") as f_out:
                 f_out.write(text)
@@ -106,7 +106,10 @@ def merge(base_dir: os.PathLike):
         for file in input_files:
             with open(file, "r") as f:
                 text = f.read()
-            f_out.write(f"{text}\n")
+            if not text:
+                print(f"Empty file: {file}")
+            f_out.write(f"{text}")
+            f_out.write(f"<|endoftext|>")
 
 def main():
     parser = argparse.ArgumentParser()
