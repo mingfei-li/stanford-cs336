@@ -59,7 +59,7 @@ def train(args):
         lr=0.5,
         epoch=15,
         wordNgrams=2,
-        dim=200,
+        dim=100,
         minn=2,
         maxn=5,
     )
