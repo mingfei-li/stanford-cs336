@@ -62,7 +62,6 @@ def process_single_wet_file(
     with gzip.open(input_file, "rb") as f_in:
         for record in ArchiveIterator(f_in):
             count += 1
-    return input_file
     
     with gzip.open(input_file, "rb") as f_in:
         for record in tqdm(ArchiveIterator(f_in), desc=filename, total=count):
