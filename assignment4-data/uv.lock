@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.12' and sys_platform == 'linux'",
@@ -221,6 +221,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pytest" },
     { name = "resiliparse" },
+    { name = "submitit" },
     { name = "tldextract" },
     { name = "torch", version = "2.2.2", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'" },
     { name = "torch", version = "2.7.0", source = { registry = "https://pypi.org/simple" }, marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'" },
@@ -239,6 +240,7 @@ requires-dist = [
     { name = "numpy", specifier = "<2.0" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "resiliparse", specifier = ">=0.15.2" },
+    { name = "submitit", specifier = ">=1.5.2" },
     { name = "tldextract", specifier = ">=5.3.0" },
     { name = "torch", marker = "platform_machine != 'x86_64' or sys_platform != 'darwin'", specifier = "~=2.7.0" },
     { name = "torch", marker = "platform_machine == 'x86_64' and sys_platform == 'darwin'", specifier = "~=2.2.2" },
