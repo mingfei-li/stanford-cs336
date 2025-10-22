@@ -92,6 +92,7 @@ def main():
     parser.add_argument("base_dir")
     parser.add_argument("--slurm_partition")
     parser.add_argument("--batch_size", type=int)
+    parser.add_argument("--max_concurrent_jobs", type=int)
     args = parser.parse_args()
 
     executor = submitit.AutoExecutor(folder="data/slurm_logs")
@@ -99,6 +100,7 @@ def main():
         slurm_partition=args.slurm_partition,
         cpus_per_task=1,
         timeout_min=60*24*3,
+        slurm_array_parallelism=args.max_concurrent_jobs,
     )
 
     input_dir = os.path.join(args.base_dir, "input")
