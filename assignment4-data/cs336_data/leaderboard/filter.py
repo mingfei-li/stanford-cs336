@@ -57,8 +57,14 @@ def process_single_wet_file(
     filename = os.path.basename(input_file)
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(discarded_dir, exist_ok=True)
+
+    count = 0
     with gzip.open(input_file, "rb") as f_in:
         for record in ArchiveIterator(f_in):
+            count += 1
+    
+    with gzip.open(input_file, "rb") as f_in:
+        for record in tqdm(ArchiveIterator(f_in), desc=filename, total=count):
             text = record.reader.read().decode("utf-8")
             if not language_filter(text):
                 discard(text, "lanugage")
@@ -90,6 +96,7 @@ def main():
     executor.update_parameters(
         slurm_partition="compute",
         cpus_per_task=1,
+        timeout_min=60*24*3,
     )
 
     jobs = []
