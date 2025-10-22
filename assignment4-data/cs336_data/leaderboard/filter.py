@@ -62,6 +62,7 @@ def process_single_wet_file(
     with gzip.open(input_file, "rb") as f_in:
         for record in ArchiveIterator(f_in):
             count += 1
+    return input_file
     
     with gzip.open(input_file, "rb") as f_in:
         for record in tqdm(ArchiveIterator(f_in), desc=filename, total=count):
@@ -90,32 +91,37 @@ def process_single_wet_file(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("base_dir")
+    parser.add_argument("--slurm_partition")
+    parser.add_argument("--batch_size", type=int)
     args = parser.parse_args()
 
     executor = submitit.AutoExecutor(folder="data/slurm_logs")
     executor.update_parameters(
-        slurm_partition="compute",
+        slurm_partition=args.slurm_partition,
         cpus_per_task=1,
         timeout_min=60*24*3,
     )
 
-    jobs = []
     input_dir = os.path.join(args.base_dir, "input")
-    with executor.batch():
-        for wet_file in os.listdir(input_dir):
-            input_file = os.path.join(input_dir, wet_file)
-            output_dir = os.path.join(args.base_dir, f"output/{wet_file}")
-            discard_dir = os.path.join(args.base_dir, f"discard/{wet_file}")
-            job = executor.submit(
-                process_single_wet_file,
-                input_file,
-                output_dir,
-                discard_dir,
-            )
-            jobs.append(job)
+    wet_files = os.listdir(input_dir)
+    for batch_start in range(0, len(wet_files), args.batch_size):
+        jobs = []
+        with executor.batch():
+            for wet_file in wet_files[batch_start:batch_start+args.batch_size]:
+                input_file = os.path.join(input_dir, wet_file)
+                output_dir = os.path.join(args.base_dir, f"output/{wet_file}")
+                discard_dir = os.path.join(args.base_dir, f"discard/{wet_file}")
+                job = executor.submit(
+                    process_single_wet_file,
+                    input_file,
+                    output_dir,
+                    discard_dir,
+                )
+                jobs.append(job)
 
-    for job in tqdm(submitit.helpers.as_completed(jobs), total=len(jobs)):
-        print(f"Processing complete: {job.result()}")
+        print(f"Batch submitted: start_index={batch_start}, batch_size={len(jobs)}")
+        for job in tqdm(submitit.helpers.as_completed(jobs), total=len(jobs)):
+            print(f"Processing complete: {job.result()}")
 
 if __name__ == "__main__":
     main()
