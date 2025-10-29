@@ -28,6 +28,7 @@ def evaluate_vllm(
         sample = {
             "prompt": output.prompt,
             "generated_text": generated_text,
+            "ground_truth": ground_truth,
         }
         rewards = reward_fn(generated_text, ground_truth)
         for k, v in rewards.items():
@@ -37,9 +38,9 @@ def evaluate_vllm(
     with open("data/math_baseline.json", "w") as f:
         json.dump(samples, f, indent=4)
     print(f"=== Total rewards for {len(prompts)} samples ===")
-    print(f" - format_reward: {total_rewards["format_reward"]}")
-    print(f" - answer_reward: {total_rewards["answer_reward"]}")
-    print(f" - reward: {total_rewards["reward"]}")
+    print(f" - format_reward: {total_rewards['format_reward']}")
+    print(f" - answer_reward: {total_rewards['answer_reward']}")
+    print(f" - reward: {total_rewards['reward']}")
 
 if __name__ == "__main__":
     sampling_params = SamplingParams(
