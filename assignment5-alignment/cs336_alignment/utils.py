@@ -1,5 +1,5 @@
 from vllm import LLM, SamplingParams
-from transformers import PreTrainedTokenizerBase
+from transformers import PreTrainedTokenizerBase, PreTrainedModel
 from typing import Callable
 import json
 import torch
@@ -63,3 +63,20 @@ def compute_entropy(logits: torch.Tensor) -> torch.Tensor:
     probs = exps / sum_exps
     log_probs = logits - torch.log(sum_exps)
     return -torch.sum(probs * log_probs, dim=-1)
+
+def compute_log_probs(logits: torch.Tensor, labels: torch.Tensor) -> torch.Tensor:
+    log_probs = logits - torch.logsumexp(logits, dim=-1, keepdims=True)
+    log_probs_for_labels = torch.gather(log_probs, -1, labels.unsqueeze(-1))
+    return log_probs_for_labels.squeeze(-1)
+
+def get_response_log_probs(
+    model: PreTrainedModel,
+    input_ids: torch.Tensor,
+    labels: torch.Tensor,
+    return_token_entropy: bool = False,
+) -> dict[str, torch.Tensor]:
+    logits = model(input_ids).logits
+    result = {"log_probs": compute_log_probs(logits, labels)}
+    if return_token_entropy:
+        result["token_entropy"] = compute_entropy(logits)
+    return result
