@@ -1,19 +1,22 @@
 from vllm import LLM, SamplingParams
-from typing import Callable, List
+from typing import Callable, List, Any
 from datasets import load_dataset, Dataset
 from drgrpo_grader import r1_zero_reward_fn
 from utils import evaluate_vllm
+import argparse
 import json
+import os
+import torch
 
-def load_math_dataset() -> list[dict[str, str]]:
+def load_math_dataset(path: os.PathLike) -> list[dict[str, str]]:
     examples = []
-    with open("MATH/validation.jsonl") as f:
+    with open(path, "r") as f:
         for line in f:
             example = json.loads(line)
             examples.append(example)
     return examples
 
-def generate_prompts(dataset: Dataset) -> List[str]:
+def generate_prompts(dataset: list[Any]) -> List[str]:
     with open("prompts/r1_zero.prompt") as f:
         prompt_template = f.read()
     prompts = [
@@ -23,20 +26,34 @@ def generate_prompts(dataset: Dataset) -> List[str]:
     return prompts
 
 if __name__ == "__main__":
-    llm = LLM("Qwen/Qwen2.5-Math-1.5B")
-    dataset = load_math_dataset()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model")
+    parser.add_argument("--input")
+    parser.add_argument("--output")
+    parser.add_argument("--n_samples", type=int, default=None)
+
+    args = parser.parse_args()
+
+    llm = LLM(
+        args.model,
+        max_model_len=2048,
+        dtype=torch.bfloat16,
+    )
+    dataset = load_math_dataset(args.input)
+    if args.n_samples is not None:
+        dataset = dataset[:args.n_samples]
     prompts = generate_prompts(dataset)
     ground_truths = [example["solution"] for example in dataset]
     sampleing_params = SamplingParams(
         temperature=1.0,
         top_p=1.0,
-        max_tokens=1024,
+        max_tokens=2048,
         stop=["</answer>"],
         include_stop_str_in_output=True,
     )
 
     evaluate_vllm(
-        eval_id="math_baseline",
+        eval_id=args.output,
         vllm_model=llm,
         reward_fn=r1_zero_reward_fn,
         prompts=prompts,
