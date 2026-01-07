@@ -2,6 +2,7 @@ from vllm import LLM, SamplingParams
 from typing import Callable, List
 from datasets import load_dataset, Dataset
 from drgrpo_grader import r1_zero_reward_fn
+from utils import evaluate_vllm
 import json
 
 def load_math_dataset() -> list[dict[str, str]]:
@@ -11,29 +12,6 @@ def load_math_dataset() -> list[dict[str, str]]:
             example = json.loads(line)
             examples.append(example)
     return examples
-
-def evaluate_vllm(
-    eval_id: str,
-    vllm_model: LLM,
-    reward_fn: Callable[[str, str], dict[str, float]],
-    prompts: List[str],
-    ground_truths: List[str],
-    eval_sampling_params: SamplingParams,
-) -> None:
-    """
-    Evaluate a language model on a list of prompts,
-    compute evaluation metrics, and serialize results to disk.
-    """
-
-    outputs = vllm_model.generate(prompts, eval_sampling_params)
-    with open(f"eval_outputs/{eval_id}.jsonl", "w") as f:
-        for prompt, output, ground_truth in zip(prompts, outputs, ground_truths):
-            response = output.outputs[0].text
-            eval_result = reward_fn(response, ground_truth)
-            eval_result["prompt"] = prompt
-            eval_result["ground_truth"] = ground_truth
-            eval_result["response"] = response
-            f.write(json.dumps(eval_result) + "\n")
 
 def generate_prompts(dataset: Dataset) -> List[str]:
     with open("prompts/r1_zero.prompt") as f:
