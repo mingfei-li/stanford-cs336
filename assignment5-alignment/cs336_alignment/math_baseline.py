@@ -27,8 +27,8 @@ def generate_prompts(dataset: list[Any]) -> List[str]:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model")
-    parser.add_argument("--input")
+    parser.add_argument("--model", default="Qwen/Qwen2.5-Math-1.5B")
+    parser.add_argument("--input", default="MATH/validation.jsonl")
     parser.add_argument("--output")
     parser.add_argument("--n_samples", type=int, default=None)
 
