@@ -1,31 +1,42 @@
 from vllm import LLM, SamplingParams
 from transformers import PreTrainedTokenizerBase, PreTrainedModel
 from typing import Callable
+from pathlib import Path
 import json
 import torch
 
 def evaluate_vllm(
-    eval_id: str,
     vllm_model: LLM,
     reward_fn: Callable[[str, str], dict[str, float]],
     prompts: list[str],
     ground_truths: list[str],
     eval_sampling_params: SamplingParams,
-) -> None:
+    output_path: Path,
+) -> dict[str, float]:
     """
     Evaluate a language model on a list of prompts,
     compute evaluation metrics, and serialize results to disk.
     """
 
     outputs = vllm_model.generate(prompts, eval_sampling_params)
-    with open(f"eval_outputs/{eval_id}.jsonl", "w") as f:
+    output_dir = output_path.parent
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    results = {"format_reward": 0., "answer_reward": 0., "reward": 0.}
+    with open(output_path, "w") as f:
         for prompt, output, ground_truth in zip(prompts, outputs, ground_truths):
             response = output.outputs[0].text
+
             eval_result = reward_fn(response, ground_truth)
             eval_result["prompt"] = prompt
             eval_result["ground_truth"] = ground_truth
             eval_result["response"] = response
             f.write(json.dumps(eval_result) + "\n")
+
+            results["format_reward"] += eval_result["format_reward"] / len(prompts)
+            results["answer_reward"] += eval_result["answer_reward"] / len(prompts)
+            results["reward"] += eval_result["reward"] / len(prompts)
+    return results
 
 def tokenize_prompt_and_output(
     prompt_strs: list[str],
@@ -44,7 +55,7 @@ def tokenize_prompt_and_output(
         encoded_inputs, padding=True, return_tensors="pt")["input_ids"]
     input_ids = encoded_inputs[:, :-1]
     labels = encoded_inputs[:, 1:]
-    response_mask = torch.zeros_like(input_ids)
+    response_mask = torch.zeros_like(input_ids, dtype=bool)
     for i in range(len(prompt_ids)):
         start = len(prompt_ids[i]) - 1
         end = start + len(output_ids[i])

@@ -3,6 +3,7 @@ from typing import Callable, List, Any
 from datasets import load_dataset, Dataset
 from drgrpo_grader import r1_zero_reward_fn
 from utils import evaluate_vllm
+from pathlib import Path
 import argparse
 import json
 import os
@@ -29,7 +30,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="Qwen/Qwen2.5-Math-1.5B")
     parser.add_argument("--input", default="MATH/validation.jsonl")
-    parser.add_argument("--output")
+    parser.add_argument("--output", default="eval_outputs/math_baseline.jsonl")
     parser.add_argument("--n_samples", type=int, default=None)
 
     args = parser.parse_args()
@@ -52,11 +53,12 @@ if __name__ == "__main__":
         include_stop_str_in_output=True,
     )
 
-    evaluate_vllm(
-        eval_id=args.output,
+    results = evaluate_vllm(
         vllm_model=llm,
         reward_fn=r1_zero_reward_fn,
         prompts=prompts,
         ground_truths=ground_truths,
-        eval_sampling_params=sampleing_params
+        eval_sampling_params=sampleing_params,
+        output_path=Path(args.output),
     )
+    print(results)
