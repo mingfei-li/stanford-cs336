@@ -1,6 +1,6 @@
 from drgrpo_grader import r1_zero_reward_fn
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 from unittest.mock import patch
 from vllm import LLM, SamplingParams
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
@@ -72,7 +72,7 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
     llm_model = llm.llm_engine.model_executor.driver_worker.model_runner.model
     llm_model.load_weights(state_dict.items())
 
-def init_wandb(config):
+def init(config):
     wandb.init(project="cs336-assignment5", name=config["exp_id"], config=config)
     wandb.define_metric("train_step")
     wandb.define_metric("eval_step")
@@ -80,19 +80,22 @@ def init_wandb(config):
     wandb.define_metric("train/*", step_metric="train_step")
     wandb.define_metric("eval/*", step_metric="eval_step")
 
+    torch.manual_seed(config["seed"])
+    torch.cuda.manual_seed_all(config["seed"])
+
 def load_eval_data(data_path):
     with open("prompts/r1_zero.prompt") as f:
         prompt_template = f.read()
     prompts = []
     ground_truths = []
-    with open(data_path, "r") as f:
+    with open(config["eval_data"], "r") as f:
         for line in f:
             sample = json.loads(line)
             prompts.append(prompt_template.format(question=sample["problem"]))
             ground_truths.append(sample["solution"])
     return {
-        "prompts": prompts[:10],
-        "ground_truths": ground_truths[:10],
+        "prompts": prompts[:config["n_eval_samples"]],
+        "ground_truths": ground_truths[:config["n_eval_samples"]],
     }
 
 
@@ -122,20 +125,17 @@ def evaluate(config, policy, vllm_model, eval_data, eval_step):
 
 
 def train(config):
-    init_wandb(config)
     vllm_model = init_vllm(
         config["model_id"],
         config["inference_device"],
         config["seed"],
         0.65,
     )
-    print(f"vllm_model.device={vllm_model.llm_engine.model_executor.driver_worker.device}")
     model = AutoModelForCausalLM.from_pretrained(
         config["model_id"],
         torch_dtype=torch.bfloat16,
         attn_implementation="flash_attention_2",
     ).to(config["train_device"])
-    print(f"model.device={model.device}")
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config["lr"],
@@ -144,14 +144,21 @@ def train(config):
     tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
 
     dataset = SFTDataset(config["train_data"])
-    dataloader = DataLoader(dataset, batch_size=config["micro_batch_size"], shuffle=True)
-    eval_data = load_eval_data(config["eval_data"])
+    if config["n_sft_samples"]:
+        dataset = Subset(dataset, range(config["n_sft_samples"]))
+
+    dataloader = DataLoader(
+        dataset,
+        batch_size=config["micro_batch_size"],
+        shuffle=True,
+    )
+    eval_data = load_eval_data(config)
 
     train_step = 0
     train_loss = 0.
-    #evaluate(config, model, vllm_model, eval_data, train_step)
+    evaluate(config, model, vllm_model, eval_data, train_step)
     for epoch in range(config["n_epochs"]):
-        for batch_id, batch in tqdm(enumerate(dataloader)):
+        for batch_id, batch in enumerate(tqdm(dataloader)):
             prompts, responses = batch
             batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
             batch = {k:v.to(config["train_device"]) for k,v in batch.items()}
@@ -187,7 +194,7 @@ def train(config):
 
 if __name__ == "__main__":
     config = {
-        "exp_id": "sft-1",
+        "exp_id": "sft-256-samples",
         "seed": 42,
         "model_id": "Qwen/Qwen2.5-Math-1.5B",
         "train_device": "cuda:1",
@@ -198,7 +205,10 @@ if __name__ == "__main__":
         "weight_decay": 1e-5,
         "micro_batch_size": 1,
         "gradient_accumulation_steps": 16,
-        "eval_steps": 100,
+        "eval_steps": 1,
         "n_epochs": 1,
+        "n_sft_samples": 256,
+        "n_eval_samples": 100,
     }
+    init(config)
     train(config)
