@@ -47,15 +47,18 @@ def tokenize_prompt_and_output(
     output_ids = tokenizer(output_strs)["input_ids"]
     encoded_inputs = {
         "input_ids": [
-            prompt + output 
+            prompt + output
             for prompt, output in zip(prompt_ids, output_ids)
         ],
     }
     encoded_inputs = tokenizer.pad(
-        encoded_inputs, padding=True, return_tensors="pt")["input_ids"]
+        encoded_inputs,
+        padding=True,
+        return_tensors="pt",
+    )["input_ids"]
     input_ids = encoded_inputs[:, :-1]
     labels = encoded_inputs[:, 1:]
-    response_mask = torch.zeros_like(input_ids, dtype=bool)
+    response_mask = torch.zeros_like(input_ids, dtype=torch.bool)
     for i in range(len(prompt_ids)):
         start = len(prompt_ids[i]) - 1
         end = start + len(output_ids[i])
@@ -118,6 +121,6 @@ def sft_microbatch_train_step(
     ) / (policy_log_probs.shape[0] * gradient_accumulation_steps)
     
     loss.backward()
-    return loss, {}
+    return loss.item(), {}
 
     

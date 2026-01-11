@@ -73,7 +73,12 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
     llm_model.load_weights(state_dict.items())
 
 def init(config):
-    wandb.init(project="cs336-assignment5", name=config["exp_id"], config=config)
+    run = wandb.init(
+        project="cs336-assignment5",
+        name=config["exp_id"],
+        config=config,
+    )
+
     wandb.define_metric("train_step")
     wandb.define_metric("eval_step")
 
@@ -82,6 +87,7 @@ def init(config):
 
     torch.manual_seed(config["seed"])
     torch.cuda.manual_seed_all(config["seed"])
+    return run
 
 def load_eval_data(data_path):
     with open("prompts/r1_zero.prompt") as f:
@@ -104,7 +110,7 @@ def evaluate(config, policy, vllm_model, eval_data, eval_step):
     sampling_params = SamplingParams(
         temperature=1.0,
         top_p=1.0,
-        max_tokens=2048,
+        max_tokens=config["max_seq_len"],
         stop=["</answer>"],
         include_stop_str_in_output=True,
     )
@@ -161,7 +167,7 @@ def train(config):
         for batch_id, batch in enumerate(tqdm(dataloader)):
             prompts, responses = batch
             batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
-            batch = {k:v.to(config["train_device"]) for k,v in batch.items()}
+            batch = {k:v[:,:config["max_seq_len"]].to(config["train_device"]) for k,v in batch.items()}
 
             results = get_response_log_probs(
                 model,
@@ -194,7 +200,7 @@ def train(config):
 
 if __name__ == "__main__":
     config = {
-        "exp_id": "sft-256-samples",
+        "exp_id": "sft-samples-exp",
         "seed": 42,
         "model_id": "Qwen/Qwen2.5-Math-1.5B",
         "train_device": "cuda:1",
@@ -209,6 +215,15 @@ if __name__ == "__main__":
         "n_epochs": 1,
         "n_sft_samples": 256,
         "n_eval_samples": 100,
+        "max_seq_len": 20,
     }
-    init(config)
-    train(config)
+    for lr in [1e-4, 1e-5, 1e-6]:
+        for gradient_accumulation_steps in [16, 32, 64]:
+            for n_sft_samples in [0, 128, 256, 512, 1024]:
+                config["n_sft_samples"] = n_sft_samples
+                config["lr"] = lr
+                config["gradient_accumulation_steps"] = gradient_accumulation_steps
+                config["exp_id"] = f"n_sft_samples={n_sft_samples}, lr={lr}, batch_size={gradient_accumulation_steps}"
+                run = init(config)
+                train(config)
+                run.finish()
