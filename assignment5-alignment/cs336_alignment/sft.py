@@ -74,7 +74,7 @@ def load_policy_into_vllm_instance(policy: PreTrainedModel, llm: LLM):
 
 def init(config):
     run = wandb.init(
-        project="cs336-assignment5",
+        project="cs336-assignment5-sft",
         name=config["exp_id"],
         config=config,
     )
@@ -161,8 +161,9 @@ def train(config):
     eval_data = load_eval_data(config)
 
     train_step = 0
+    eval_step = 0
     train_loss = 0.
-    evaluate(config, model, vllm_model, eval_data, train_step)
+    evaluate(config, model, vllm_model, eval_data, eval_step)
     for epoch in range(config["n_epochs"]):
         for batch_id, batch in enumerate(tqdm(dataloader)):
             prompts, responses = batch
@@ -195,8 +196,9 @@ def train(config):
                 })
                 train_loss = 0.
 
-                if train_step % config["eval_steps"] == 0:
-                    evaluate(config, model, vllm_model, eval_data, train_step)
+            if (batch_id+1) % config["eval_steps"] == 0:
+                eval_step += 1
+                evaluate(config, model, vllm_model, eval_data, eval_step)
 
 if __name__ == "__main__":
     config = {
@@ -211,11 +213,11 @@ if __name__ == "__main__":
         "weight_decay": 1e-5,
         "micro_batch_size": 1,
         "gradient_accumulation_steps": 16,
-        "eval_steps": 1,
+        "eval_steps": 64,
         "n_epochs": 1,
         "n_sft_samples": 256,
         "n_eval_samples": 100,
-        "max_seq_len": 20,
+        "max_seq_len": 40960,
     }
     for lr in [1e-4, 1e-5, 1e-6]:
         for gradient_accumulation_steps in [16, 32, 64]:
@@ -223,7 +225,7 @@ if __name__ == "__main__":
                 config["n_sft_samples"] = n_sft_samples
                 config["lr"] = lr
                 config["gradient_accumulation_steps"] = gradient_accumulation_steps
-                config["exp_id"] = f"n_sft_samples={n_sft_samples}, lr={lr}, batch_size={gradient_accumulation_steps}"
+                config["exp_id"] = f"lr={lr}, batch_size={gradient_accumulation_steps}, n_sft_samples={n_sft_samples}"
                 run = init(config)
                 train(config)
                 run.finish()
