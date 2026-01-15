@@ -105,8 +105,8 @@ def load_eval_data(data_path):
     }
 
 
-def evaluate(config, policy, vllm_model, eval_data, eval_step):
-    load_policy_into_vllm_instance(policy, vllm_model)
+def evaluate(config, policy, llm, eval_data, eval_step):
+    load_policy_into_vllm_instance(policy, llm)
     sampling_params = SamplingParams(
         temperature=1.0,
         top_p=1.0,
@@ -115,7 +115,7 @@ def evaluate(config, policy, vllm_model, eval_data, eval_step):
         include_stop_str_in_output=True,
     )
     results = evaluate_vllm(
-        vllm_model,
+        llm,
         r1_zero_reward_fn,
         eval_data["prompts"],
         eval_data["ground_truths"],
@@ -130,40 +130,19 @@ def evaluate(config, policy, vllm_model, eval_data, eval_step):
     })
 
 
-def train(config):
-    vllm_model = init_vllm(
-        config["model_id"],
-        config["inference_device"],
-        config["seed"],
-        0.65,
-    )
-    model = AutoModelForCausalLM.from_pretrained(
-        config["model_id"],
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-    ).to(config["train_device"])
+def train(model, llm, dataloader, config):
+
+    eval_data = load_eval_data(config)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=config["lr"],
         weight_decay=config["weight_decay"],
     )
-    tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
-
-    dataset = SFTDataset(config["train_data"])
-    if config["n_sft_samples"]:
-        dataset = Subset(dataset, range(config["n_sft_samples"]))
-
-    dataloader = DataLoader(
-        dataset,
-        batch_size=config["micro_batch_size"],
-        shuffle=True,
-    )
-    eval_data = load_eval_data(config)
-
+    optimizer.zero_grad()
     train_step = 0
     eval_step = 0
     train_loss = 0.
-    evaluate(config, model, vllm_model, eval_data, eval_step)
+    evaluate(config, model, llm, eval_data, eval_step)
     for epoch in range(config["n_epochs"]):
         for batch_id, batch in enumerate(tqdm(dataloader)):
             prompts, responses = batch
@@ -193,14 +172,15 @@ def train(config):
                 wandb.log({
                     "train_step": train_step,
                     "train/loss": train_loss,
+                    "train/token_entropy": results["token_entropy"].mean(),
                 })
                 train_loss = 0.
 
             if (batch_id+1) % config["eval_steps"] == 0:
                 eval_step += 1
-                evaluate(config, model, vllm_model, eval_data, eval_step)
+                evaluate(config, model, llm, eval_data, eval_step)
 
-if __name__ == "__main__":
+def train_sft():
     config = {
         "exp_id": "sft-samples-exp",
         "seed": 42,
@@ -221,11 +201,36 @@ if __name__ == "__main__":
     }
     for lr in [1e-4, 1e-5, 1e-6]:
         for gradient_accumulation_steps in [16, 32, 64]:
-            for n_sft_samples in [0, 128, 256, 512, 1024]:
+            for n_sft_samples in [128, 256, 512, 1024]:
                 config["n_sft_samples"] = n_sft_samples
                 config["lr"] = lr
                 config["gradient_accumulation_steps"] = gradient_accumulation_steps
                 config["exp_id"] = f"lr={lr}, batch_size={gradient_accumulation_steps}, n_sft_samples={n_sft_samples}"
                 run = init(config)
-                train(config)
+
+                llm = init_vllm(
+                    config["model_id"],
+                    config["inference_device"],
+                    config["seed"],
+                    0.65,
+                )
+                model = AutoModelForCausalLM.from_pretrained(
+                    config["model_id"],
+                    torch_dtype=torch.bfloat16,
+                    attn_implementation="flash_attention_2",
+                ).to(config["train_device"])
+                tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
+
+                dataset = SFTDataset(config["train_data"])
+                if config["n_sft_samples"]:
+                    dataset = Subset(dataset, range(config["n_sft_samples"]))
+                dataloader = DataLoader(
+                    dataset,
+                    batch_size=config["micro_batch_size"],
+                    shuffle=True,
+                )
+                train(model, llm, dataloader, config)
                 run.finish()
+
+if __name__ == "__main__":
+    train_sft()
