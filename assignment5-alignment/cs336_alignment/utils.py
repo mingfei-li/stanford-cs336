@@ -123,4 +123,22 @@ def sft_microbatch_train_step(
     loss.backward()
     return loss.item(), {}
 
+def compute_group_normalized_rewards(
+    reward_fn: Callable[[str, str], dict[str, float]],
+    rollout_responses: list[str],
+    repeated_ground_truths: list[str],
+    group_size: int,
+    advantage_eps: float,
+    normalize_by_std: bool,
+) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
+    rewards = []
+    for response, ground_truth in zip(rollout_responses, repeated_ground_truths):
+        rewards.append(reward_fn(response, ground_truth)["reward"])
     
+    rewards = torch.Tensor(rewards).view(-1, group_size)
+    mean_rewards = rewards.mean(dim=-1, keepdims=True)
+    advantages = rewards - mean_rewards
+    if normalize_by_std:
+        std_rewards = rewards.std(dim=-1, keepdims=True)
+        advantages = advantages / (std_rewards + advantage_eps)
+    return advantages.view(-1), rewards.view(-1), {}
