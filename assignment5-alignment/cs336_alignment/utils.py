@@ -142,3 +142,10 @@ def compute_group_normalized_rewards(
         std_rewards = rewards.std(dim=-1, keepdims=True)
         advantages = advantages / (std_rewards + advantage_eps)
     return advantages.view(-1), rewards.view(-1), {}
+
+def compute_naive_policy_gradient_loss(
+    raw_rewards_or_advantages: torch.Tensor,
+    policy_log_probs: torch.Tensor,
+) -> torch.Tensor:
+    loss = -raw_rewards_or_advantages * policy_log_probs
+    return loss
