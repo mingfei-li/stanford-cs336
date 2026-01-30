@@ -24,18 +24,18 @@ def evaluate_vllm(
 
     results = {"format_reward": 0., "answer_reward": 0., "reward": 0.}
     with open(output_path, "w") as f:
-        for prompt, output, ground_truth in zip(prompts, outputs, ground_truths):
-            response = output.outputs[0].text
+        for prompt, outputs_for_prompt, ground_truth in zip(prompts, outputs, ground_truths):
+            for output in outputs_for_prompt.outputs:
+                response = output.text
+                eval_result = reward_fn(response, ground_truth)
+                eval_result["prompt"] = prompt
+                eval_result["ground_truth"] = ground_truth
+                eval_result["response"] = response
+                f.write(json.dumps(eval_result) + "\n")
 
-            eval_result = reward_fn(response, ground_truth)
-            eval_result["prompt"] = prompt
-            eval_result["ground_truth"] = ground_truth
-            eval_result["response"] = response
-            f.write(json.dumps(eval_result) + "\n")
-
-            results["format_reward"] += eval_result["format_reward"] / len(prompts)
-            results["answer_reward"] += eval_result["answer_reward"] / len(prompts)
-            results["reward"] += eval_result["reward"] / len(prompts)
+                results["format_reward"] += eval_result["format_reward"] / len(prompts)
+                results["answer_reward"] += eval_result["answer_reward"] / len(prompts)
+                results["reward"] += eval_result["reward"] / len(prompts)
     return results
 
 def tokenize_prompt_and_output(

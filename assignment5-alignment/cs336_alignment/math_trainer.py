@@ -34,6 +34,17 @@ class SFTDataset(Dataset):
     def __getitem__(self, index):
         return self.data[index]["prompt"], self.data[index]["response"]
 
+class RLDataset(Dataset):
+    def __init__(self, file_path: os.PathLike):
+        with open(file_path, "r") as f:
+            self.data = [json.loads(line) for line in f]
+
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        return self.data[index]["prompt"], self.data[index]["response"], self.data[index]["reward"]
+
 def init_vllm(
     model_id: str,
     device: str,
@@ -251,8 +262,8 @@ def sample_rollouts(
     sampling_params = SamplingParams(
         temperature=1.0,
         top_p=1.0,
-        max_tokens=config["max_seq_len"],
-        min_tokens=15,
+        max_tokens=config["sampling_max_tokens"],
+        min_tokens=config["sampling_min_tokens"],
         stop=["</answer>"],
         include_stop_str_in_output=True,
         n=n_rollouts_per_prompt,
@@ -287,6 +298,8 @@ def main_ei():
         "max_seq_len": 40960,
         "n_ei_steps": 5,
         "ei_data": "MATH/train.jsonl",
+        "sampling_min_tokens": 15,
+        "sampling_max_tokens": 40960,
     }
 
     llm = init_vllm(
@@ -339,6 +352,10 @@ def main_ei():
             global_step = train(model, tokenizer, llm, dataloader, config, global_step)
         run.finish()
 
+
+def train_grpo(model, tokenizer, llm, dataloader, config, global_step):
+    pass
+
 def main_grpo():
     config = {
         "wandb_project": "cs336-assignment5-grpo",
@@ -347,25 +364,62 @@ def main_grpo():
         "model_id": "Qwen/Qwen2.5-Math-1.5B",
         "train_device": "cuda:1",
         "inference_device": "cuda:0",
-        "train_data": "MATH/sft.jsonl",
         "eval_data": "MATH/validation.jsonl",
-        "lr": 1e-4,
+        "n_grpo_steps": 200,
+        "advantage_eps": 1e-6,
+        "rollout_batch_size": 256,
+        "group_size": 8,
+        "sampling_min_tokens": 15,
+        "sampling_max_tokens": 40960,
+        "epochs_per_rollout_batch": 1,
+        "train_batch_size": 256,
+        "lr": 1e-5,
         "weight_decay": 0.0,
-        "micro_batch_size": 1,
-        "gradient_accumulation_steps": 32,
-        "eval_steps": 64,
-        "n_epochs": 1,
-        "n_sft_samples": 0,
-        "n_eval_samples": 100,
+        "gradient_accumulation_steps": 128,
+        "gpu_memory_utilization": 0.85,
+        "loss_type": "reinforce_with_baseline",
+        "use_std_normalization": True,
+        "eval_grpo_steps": 2,
+        "n_eval_samples": 1024,
         "max_seq_len": 40960,
+        "grpo_train_data": "MATH/train.jsonl",
     }
 
     llm = init_vllm(
         config["model_id"],
         config["inference_device"],
         config["seed"],
-        0.65,
+        config["gpu_memory_utilization"],
     )
+
+    run = init(config)
+    model = AutoModelForCausalLM.from_pretrained(
+        config["model_id"],
+        torch_dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
+    ).to(config["train_device"])
+    tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
+
+    global_step = 0
+    for grpo_step in tqdm(range(config["n_grpo_steps"]), "grpo_step"):
+        config["rollout_data"] = Path("grpo_rollout_data") / config["exp_id"] / f"{grpo_step}.jsonl"
+        sample_rollouts(
+            model,
+            llm,
+            config,
+            config["grpo_train_data"],
+            config["rollout_batch_size"] // config["group_size"],
+            config["train_data"],
+            config["group_size"],
+        )
+        dataset = RLDataset(config["rollout_data"])
+        dataloader = DataLoader(
+            dataset,
+            batch_size=(config["train_batch_size"] // config["gradient_accumulation_steps"]),
+            shuffle=False,
+        )
+        global_step = train_grpo(model, tokenizer, llm, dataloader, config, global_step)
+    run.finish()
 
 
 if __name__ == "__main__":
