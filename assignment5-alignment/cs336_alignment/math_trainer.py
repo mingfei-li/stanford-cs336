@@ -6,6 +6,7 @@ from vllm import LLM, SamplingParams
 from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from tqdm import tqdm
 from pathlib import Path
+from argparse import ArgumentParser
 
 import os
 import json
@@ -128,7 +129,7 @@ def evaluate(config, policy, llm, eval_data, step):
     }, step=step)
 
 
-def train(model, tokenizer, llm, dataloader, config, global_step, ei_step=None):
+def train(model, tokenizer, llm, dataloader, config, global_step):
     eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -178,7 +179,7 @@ def train(model, tokenizer, llm, dataloader, config, global_step, ei_step=None):
 
     return global_step
 
-def train_sft():
+def main_sft():
     config = {
         "wandb_project": "cs336-assignment5-sft",
         "exp_id": "sft-samples-exp",
@@ -232,10 +233,17 @@ def train_sft():
                 train(model, tokenizer, llm, dataloader, config, 0)
                 run.finish()
 
-def sample_rollouts(policy, llm, config):
+def sample_rollouts(
+    policy,
+    llm,
+    prompt_data_path,
+    n_prompts,
+    rollout_data_path,
+    n_rollouts_per_prompt,
+):
     data = load_from_raw_dataset(
-        config["ei_data"],
-        config["n_ei_samples"],
+        prompt_data_path,
+        n_prompts,
     )
 
     load_policy_into_vllm_instance(policy, llm)
@@ -246,7 +254,7 @@ def sample_rollouts(policy, llm, config):
         min_tokens=15,
         stop=["</answer>"],
         include_stop_str_in_output=True,
-        n=config["n_ei_rollouts"],
+        n=n_rollouts_per_prompt,
     )
     results = evaluate_vllm(
         llm,
@@ -254,10 +262,10 @@ def sample_rollouts(policy, llm, config):
         data["prompts"],
         data["ground_truths"],
         sampling_params,
-        config["train_data"],
+        rollout_data_path,
     )
 
-def train_ei():
+def main_ei():
     config = {
         "wandb_project": "cs336-assignment5-ei",
         "exp_id": "ei",
@@ -312,16 +320,64 @@ def train_ei():
         global_step = 0
         for ei_step in tqdm(range(config["n_ei_steps"]), "ei_step"):
             config["train_data"] = Path("ei_train_data") / config["exp_id"] / f"{ei_step}.jsonl"
-            sample_rollouts(model, llm, config)
+            sample_rollouts(
+                model,
+                llm,
+                config,
+                config["ei_data"],
+                config["n_ei_samples"],
+                config["train_data"],
+                config["n_ei_rollouts"],
+            )
             dataset = SFTDataset(config["train_data"])
             dataloader = DataLoader(
                 dataset,
                 batch_size=config["micro_batch_size"],
                 shuffle=True,
             )
-            global_step = train(model, tokenizer, llm, dataloader, config, global_step, ei_step)
+            global_step = train(model, tokenizer, llm, dataloader, config, global_step)
         run.finish()
 
+def main_grpo():
+    config = {
+        "wandb_project": "cs336-assignment5-grpo",
+        "exp_id": "grpo",
+        "seed": 42,
+        "model_id": "Qwen/Qwen2.5-Math-1.5B",
+        "train_device": "cuda:1",
+        "inference_device": "cuda:0",
+        "train_data": "MATH/sft.jsonl",
+        "eval_data": "MATH/validation.jsonl",
+        "lr": 1e-4,
+        "weight_decay": 0.0,
+        "micro_batch_size": 1,
+        "gradient_accumulation_steps": 32,
+        "eval_steps": 64,
+        "n_epochs": 1,
+        "n_sft_samples": 0,
+        "n_eval_samples": 100,
+        "max_seq_len": 40960,
+    }
+
+    llm = init_vllm(
+        config["model_id"],
+        config["inference_device"],
+        config["seed"],
+        0.65,
+    )
+
+
 if __name__ == "__main__":
-    #train_sft()
-    train_ei()
+    parser = ArgumentParser()
+    parser.add_argument("--method", type=str, default="sft")
+
+    args = parser.parse_args()
+    if args.method == "sft":
+        main_sft()
+    elif args.method == "ei:"
+        main_ei()
+    elif args.method == "grpo":
+        main_grpo()
+    else:
+        print(f"Unsupported method {args.method}!")
+        
