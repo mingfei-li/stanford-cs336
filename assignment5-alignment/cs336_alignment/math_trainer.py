@@ -236,6 +236,7 @@ def main_sft():
 def sample_rollouts(
     policy,
     llm,
+    config,
     prompt_data_path,
     n_prompts,
     rollout_data_path,
@@ -374,7 +375,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.method == "sft":
         main_sft()
-    elif args.method == "ei:"
+    elif args.method == "ei":
         main_ei()
     elif args.method == "grpo":
         main_grpo()
