@@ -123,6 +123,22 @@ def sft_microbatch_train_step(
     loss.backward()
     return loss.item(), {}
 
+def aggregate_entropy(
+    token_entropy: torch.Tensor,
+    response_mask: torch.Tensor,
+    gradient_accumulation_steps: int,
+    normalize_constant: float = 1.0,
+) -> torch.Tensor:
+    per_response_entropy = masked_normalize(
+        token_entropy,
+        response_mask,
+        normalize_constant,
+        dim=-1,
+    ) / response_mask.float().sum(dim=-1)
+    entropy = per_response_entropy.sum() / (token_entropy.shape[0] * gradient_accumulation_steps)
+    return entropy
+
+
 def compute_group_normalized_rewards(
     reward_fn: Callable[[str, str], dict[str, float]],
     rollout_responses: list[str],

@@ -15,8 +15,8 @@ import torch
 import wandb
 
 from utils import (
+    aggregate_entropy,
     get_response_log_probs,
-    masked_normalize,
     tokenize_prompt_and_output,
     evaluate_vllm,
     sft_microbatch_train_step,
@@ -93,6 +93,11 @@ def init(config):
         config=config,
     )
 
+    wandb.define_metric("train_step")
+    wandb.define_metric("eval_step")
+    wandb.define_metric("train/*", step_metric="train_step")
+    wandb.define_metric("eval/*", step_metric="eval_step")
+
     random.seed(config["seed"])
     torch.manual_seed(config["seed"])
     torch.cuda.manual_seed_all(config["seed"])
@@ -116,7 +121,7 @@ def load_from_raw_dataset(path, n_samples):
     }
 
 
-def evaluate(config, policy, llm, eval_data, step):
+def evaluate(config, policy, llm, eval_data, eval_step, train_step):
     load_policy_into_vllm_instance(policy, llm)
     sampling_params = SamplingParams(
         temperature=1.0,
@@ -131,30 +136,24 @@ def evaluate(config, policy, llm, eval_data, step):
         eval_data["prompts"],
         eval_data["ground_truths"],
         sampling_params,
-        Path("eval_outputs") / config["exp_id"] / f"step_{step}.jsonl",
+        Path("eval_outputs") / config["exp_id"] / f"step_{eval_step}.jsonl",
     )
     wandb.log({
         "eval/format_reward": results["format_reward"],
         "eval/answer_reward": results["answer_reward"],
         "eval/reward": results["reward"],
-    }, step=step)
+        "eval/train_step_at_eval": train_step,
+        "eval_step": eval_step,
+    })
 
 
-def train(model, tokenizer, llm, dataloader, config, global_step):
-    eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config["lr"],
-        weight_decay=config["weight_decay"],
-    )
+def train(model, optimizer, tokenizer, llm, dataloader, config, train_step):
     optimizer.zero_grad()
-    evaluate(config, model, llm, eval_data, global_step)
     train_loss = 0.
-    local_step = 0
+    token_entropy = 0.
     for epoch in tqdm(range(config["n_epochs"]), "epoch"):
         for batch_id, batch in enumerate(tqdm(dataloader, "batch_id")):
-            global_step += 1
-            local_step += 1
+            train_step += 1
 
             prompts, responses = batch
             batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
@@ -173,22 +172,26 @@ def train(model, tokenizer, llm, dataloader, config, global_step):
                 config["gradient_accumulation_steps"],
             )
             train_loss += loss
+            token_entropy += aggregate_entropy(
+                results["token_entropy"],
+                batch["response_mask"],
+                config["gradient_accumulation_steps"],
+            )
 
-            if local_step % config["gradient_accumulation_steps"] == 0:
+            if train_step % config["gradient_accumulation_steps"] == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 optimizer.zero_grad()
 
                 wandb.log({
                     "train/loss": train_loss,
-                    "train/token_entropy": results["token_entropy"].mean(),
-                }, step=global_step)
+                    "train/token_entropy": token_entropy,
+                    "train_step": train_step,
+                })
                 train_loss = 0.
+                token_entropy = 0.
 
-            if local_step % config["eval_steps"] == 0:
-                evaluate(config, model, llm, eval_data, global_step)
-
-    return global_step
+    return train_step
 
 def main_sft():
     config = {
@@ -217,6 +220,7 @@ def main_sft():
         config["seed"],
         0.65,
     )
+    eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
     for lr in [1e-4, 1e-5, 1e-6]:
         for gradient_accumulation_steps in [16, 32, 64]:
             for n_sft_samples in [128, 256, 512, 1024]:
@@ -231,6 +235,11 @@ def main_sft():
                     torch_dtype=torch.bfloat16,
                     attn_implementation="flash_attention_2",
                 ).to(config["train_device"])
+                optimizer = torch.optim.AdamW(
+                    model.parameters(),
+                    lr=config["lr"],
+                    weight_decay=config["weight_decay"],
+                )
                 tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
 
                 dataset = SFTDataset(config["train_data"])
@@ -241,7 +250,10 @@ def main_sft():
                     batch_size=config["micro_batch_size"],
                     shuffle=True,
                 )
-                train(model, tokenizer, llm, dataloader, config, 0)
+
+                evaluate(config, model, llm, eval_data, 0, 0)
+                train_step = train(model, optimizer, tokenizer, dataloader, config, 0)
+                evaluate(config, model, llm, eval_data, 1, train_step)
                 run.finish()
 
 def sample_rollouts(
@@ -329,9 +341,17 @@ def main_ei():
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
         ).to(config["train_device"])
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config["lr"],
+            weight_decay=config["weight_decay"],
+        )
         tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
 
-        global_step = 0
+        eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
+        evaluate(config, model, llm, eval_data, 0, 0)
+
+        train_step = 0
         for ei_step in tqdm(range(config["n_ei_steps"]), "ei_step"):
             config["train_data"] = Path("ei_train_data") / config["exp_id"] / f"{ei_step}.jsonl"
             sample_rollouts(
@@ -349,7 +369,8 @@ def main_ei():
                 batch_size=config["micro_batch_size"],
                 shuffle=True,
             )
-            global_step = train(model, tokenizer, llm, dataloader, config, global_step)
+            train_step = train(model, optimizer, tokenizer, dataloader, config, train_step)
+            evaluate(config, model, llm, eval_data, ei_step+1, train_step)
         run.finish()
 
 
