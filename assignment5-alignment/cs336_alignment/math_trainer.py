@@ -20,13 +20,15 @@ from utils import (
     tokenize_prompt_and_output,
     evaluate_vllm,
     sft_microbatch_train_step,
+    compute_group_normalized_rewards,
+    grpo_microbatch_train_step,
 )
 
 class SFTDataset(Dataset):
     def __init__(self, file_path: os.PathLike):
         with open(file_path, "r") as f:
             self.data = [json.loads(line) for line in f]
-        self.data = [sample for sample in self.data if sample.get("reward", 1.0) == 1.0]
+        self.data = [sample for sample in self.data]
 
     def __len__(self):
         return len(self.data)
@@ -34,16 +36,36 @@ class SFTDataset(Dataset):
     def __getitem__(self, index):
         return self.data[index]["prompt"], self.data[index]["response"]
 
-class RLDataset(Dataset):
-    def __init__(self, file_path: os.PathLike):
-        with open(file_path, "r") as f:
-            self.data = [json.loads(line) for line in f]
+class EIDataset(Dataset):
+    def __init__(self, rollouts: list[dict[str, str]]):
+        self.data = []
+        for rollout in rollouts:
+            rewards = r1_zero_reward_fn(rollout["response"], rollout["ground_truth"])
+            if rewards["reward"] > 0.: 
+                self.data.append(rollout)
 
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self, index):
-        return self.data[index]["prompt"], self.data[index]["response"], self.data[index]["reward"]
+        return self.data[index]["prompt"], self.data[index]["response"]
+
+class GRPODataset(Dataset):
+    def __init__(
+        self,
+        rollouts: list[dict[str, str]],
+    ):
+        self.data = rollouts
+
+    def __len__(self):
+        return len(self.data)
+    
+    def __getitem__(self, index):
+        return (
+            self.data[index]["prompt"],
+            self.data[index]["response"],
+            self.data[index]["ground_truth"],
+        )
 
 def init_vllm(
     model_id: str,
@@ -147,38 +169,43 @@ def evaluate(config, policy, llm, eval_data, eval_step, train_step):
     })
 
 
-def train(model, optimizer, tokenizer, llm, dataloader, config, train_step):
+def train(model, optimizer, tokenizer, dataloader, config, train_step):
     optimizer.zero_grad()
     train_loss = 0.
     token_entropy = 0.
-    for epoch in tqdm(range(config["n_epochs"]), "epoch"):
-        for batch_id, batch in enumerate(tqdm(dataloader, "batch_id")):
-            train_step += 1
+    micro_step = 0
+    for _ in tqdm(range(config["n_epochs"]), "epoch"):
+        for micro_batch in tqdm(dataloader, "micro_batch_id"):
+            micro_step += 1
 
-            prompts, responses = batch
-            batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
-            batch = {k:v[:,:config["max_seq_len"]].to(config["train_device"]) for k,v in batch.items()}
+            prompts, responses = micro_batch
+            micro_batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
+            micro_batch = {
+                k:v[:,:config["max_seq_len"]].to(config["train_device"])
+                for k,v in micro_batch.items()
+            }
 
             results = get_response_log_probs(
                 model,
-                batch["input_ids"],
-                batch["labels"],
+                micro_batch["input_ids"],
+                micro_batch["labels"],
                 return_token_entropy=True,
+            )
+            token_entropy += aggregate_entropy(
+                results["token_entropy"],
+                micro_batch["response_mask"],
+                config["gradient_accumulation_steps"],
             )
 
             loss, _ = sft_microbatch_train_step(
                 results["log_probs"],
-                batch["response_mask"],
+                micro_batch["response_mask"],
                 config["gradient_accumulation_steps"],
             )
             train_loss += loss
-            token_entropy += aggregate_entropy(
-                results["token_entropy"],
-                batch["response_mask"],
-                config["gradient_accumulation_steps"],
-            )
 
-            if train_step % config["gradient_accumulation_steps"] == 0:
+            if micro_step % config["gradient_accumulation_steps"] == 0:
+                train_step += 1
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 optimizer.zero_grad()
@@ -280,14 +307,20 @@ def sample_rollouts(
         include_stop_str_in_output=True,
         n=n_rollouts_per_prompt,
     )
-    results = evaluate_vllm(
-        llm,
-        r1_zero_reward_fn,
-        data["prompts"],
-        data["ground_truths"],
-        sampling_params,
-        rollout_data_path,
-    )
+
+    outputs = llm.generate(data["prompts"], sampling_params)
+    rollouts = []
+    with open(rollout_data_path, "w") as f:
+        for prompt, ground_truth, completion in zip(data["prompts"], data["ground_truths"], outputs):
+            for response in completion.outputs:
+                rollout = {
+                    "prompt": prompt,
+                    "ground_truth": ground_truth,
+                    "response": response,
+                }
+                rollouts.append(rollout)
+                f.write(json.dumps(rollout) + "\n")
+    return rollouts
 
 def main_ei():
     config = {
@@ -297,7 +330,7 @@ def main_ei():
         "model_id": "Qwen/Qwen2.5-Math-1.5B",
         "train_device": "cuda:1",
         "inference_device": "cuda:0",
-        "train_data": "MATH/sft.jsonl",
+        "train_data": "MATH/train.jsonl",
         "eval_data": "MATH/validation.jsonl",
         "lr": 1e-4,
         "weight_decay": 1e-5,
@@ -309,8 +342,7 @@ def main_ei():
         "n_eval_samples": 100,
         "max_seq_len": 40960,
         "n_ei_steps": 5,
-        "ei_data": "MATH/train.jsonl",
-        "sampling_min_tokens": 15,
+        "sampling_min_tokens": 4,
         "sampling_max_tokens": 40960,
     }
 
@@ -353,17 +385,16 @@ def main_ei():
 
         train_step = 0
         for ei_step in tqdm(range(config["n_ei_steps"]), "ei_step"):
-            config["train_data"] = Path("ei_train_data") / config["exp_id"] / f"{ei_step}.jsonl"
-            sample_rollouts(
+            rollouts = sample_rollouts(
                 model,
                 llm,
                 config,
-                config["ei_data"],
-                config["n_ei_samples"],
                 config["train_data"],
+                config["n_ei_samples"],
+                Path("ei_rollouts") / config["exp_id"] / f"ei_step={ei_step}",
                 config["n_ei_rollouts"],
             )
-            dataset = SFTDataset(config["train_data"])
+            dataset = EIDataset(rollouts)
             dataloader = DataLoader(
                 dataset,
                 batch_size=config["micro_batch_size"],
@@ -374,8 +405,87 @@ def main_ei():
         run.finish()
 
 
-def train_grpo(model, tokenizer, llm, dataloader, config, global_step):
-    pass
+def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
+    model.eval()
+    batches = []
+    for batch in tqdm(dataloader, "batch_id"):
+        prompts, responses, ground_truths = batch
+        batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
+        batch = {
+            k:v[:,:config["max_seq_len"]].to(config["train_device"])
+            for k,v in batch.items()
+        }
+
+        advantages, rewards, metadata = compute_group_normalized_rewards(
+            r1_zero_reward_fn,
+            responses,
+            ground_truths,
+            config["group_size"],
+            config["advantage_eps"],
+            config["use_std_normalization"],
+        )
+        batch["advantages"] = advantages.view(-1, 1).to(config["train_device"])
+        batch["rewards"] = rewards.view(-1, 1).to(config["train_device"])
+        for k,v in metadata:
+            batch[k] = v.to(config["train_device"])
+        with torch.no_grad():
+            results = get_response_log_probs(
+                model,
+                batch["input_ids"],
+                batch["labels"],
+                return_token_entropy=False,
+            )
+            batch["old_log_probs"] = results["log_probs"].to(config["train_device"])
+        batches.append(batch)
+
+    model.train()
+    optimizer.zero_grad()
+    train_loss = 0.
+    token_entropy = 0.
+    micro_step = 0
+
+    for _ in tqdm(range(config["n_epochs"]), "epoch"):
+        for batch in batches:
+            micro_step += 1
+            results = get_response_log_probs(
+                model,
+                micro_batch["input_ids"],
+                micro_batch["labels"],
+                return_token_entropy=True,
+            )
+            token_entropy += aggregate_entropy(
+                results["token_entropy"],
+                micro_batch["response_mask"],
+                config["gradient_accumulation_steps"],
+            )
+
+            loss, _ = grpo_microbatch_train_step(
+                results["log_probs"],
+                micro_batch["response_mask"],
+                config["gradient_accumulation_steps"],
+                config["loss_type"],
+                rewards,
+                advantages,
+                micro_batch["old_log_probs"],
+                config["grpo_clip_range"],
+            )
+            train_loss += loss
+
+            if micro_step % config["gradient_accumulation_steps"] == 0:
+                train_step += 1
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+
+                wandb.log({
+                    "train/loss": train_loss,
+                    "train/token_entropy": token_entropy,
+                    "train_step": train_step,
+                })
+                train_loss = 0.
+                token_entropy = 0.
+
+    return train_step
 
 def main_grpo():
     config = {
@@ -385,9 +495,11 @@ def main_grpo():
         "model_id": "Qwen/Qwen2.5-Math-1.5B",
         "train_device": "cuda:1",
         "inference_device": "cuda:0",
+        "train_data": "MATH/train.jsonl",
         "eval_data": "MATH/validation.jsonl",
         "n_grpo_steps": 200,
         "advantage_eps": 1e-6,
+        "grpo_clip_range": 0.2,
         "rollout_batch_size": 256,
         "group_size": 8,
         "sampling_min_tokens": 15,
@@ -403,7 +515,6 @@ def main_grpo():
         "eval_grpo_steps": 2,
         "n_eval_samples": 1024,
         "max_seq_len": 40960,
-        "grpo_train_data": "MATH/train.jsonl",
     }
 
     llm = init_vllm(
@@ -420,26 +531,35 @@ def main_grpo():
         attn_implementation="flash_attention_2",
     ).to(config["train_device"])
     tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config["lr"],
+        weight_decay=config["weight_decay"],
+    )
 
-    global_step = 0
+    eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
+    evaluate(config, model, llm, eval_data, 0, 0)
+
+    train_step = 0
     for grpo_step in tqdm(range(config["n_grpo_steps"]), "grpo_step"):
-        config["rollout_data"] = Path("grpo_rollout_data") / config["exp_id"] / f"{grpo_step}.jsonl"
-        sample_rollouts(
+        rollouts = sample_rollouts(
             model,
             llm,
             config,
             config["grpo_train_data"],
             config["rollout_batch_size"] // config["group_size"],
-            config["train_data"],
+            Path("grpo_rollouts") / config["exp_id"] / f"grpo_step={grpo_step}.jsonl",
             config["group_size"],
         )
-        dataset = RLDataset(config["rollout_data"])
+        dataset = GRPODataset(rollouts)
         dataloader = DataLoader(
             dataset,
-            batch_size=(config["train_batch_size"] // config["gradient_accumulation_steps"]),
+            batch_size=config["train_batch_size"],
             shuffle=False,
         )
-        global_step = train_grpo(model, tokenizer, llm, dataloader, config, global_step)
+        train_step = train_grpo(model, optimizer, tokenizer, llm, dataloader, config, train_step)
+        if (grpo_step+1) % config["eval_grpo_steps"] == 0:
+            evaluate(config, model, llm, eval_data, grpo_step+1, train_step)
     run.finish()
 
 

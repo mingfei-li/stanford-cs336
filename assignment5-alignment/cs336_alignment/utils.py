@@ -148,16 +148,29 @@ def compute_group_normalized_rewards(
     normalize_by_std: bool,
 ) -> tuple[torch.Tensor, torch.Tensor, dict[str, float]]:
     rewards = []
+    format_rewards = []
+    answer_rewards = []
+    response_len = []
     for response, ground_truth in zip(rollout_responses, repeated_ground_truths):
-        rewards.append(reward_fn(response, ground_truth)["reward"])
-    
+        results = reward_fn(response, ground_truth)
+        rewards.append(results["reward"])
+        format_rewards.append(results["format_rewards"])
+        answer_rewards.append(results["answer_rewards"])
+        response_len.append(len(response))
+
+    metadata = {
+        "avg_format_rewards": torch.Tensor(format_rewards).mean(),
+        "avg_answer_rewards": torch.Tensor(answer_rewards).mean(),
+        "avg_response_len": torch.Tensor(response_len).mean(),
+    }
+
     rewards = torch.Tensor(rewards).view(-1, group_size)
     mean_rewards = rewards.mean(dim=-1, keepdims=True)
     advantages = rewards - mean_rewards
     if normalize_by_std:
         std_rewards = rewards.std(dim=-1, keepdims=True)
         advantages = advantages / (std_rewards + advantage_eps)
-    return advantages.view(-1), rewards.view(-1), {}
+    return advantages.view(-1), rewards.view(-1), metadata
 
 def compute_naive_policy_gradient_loss(
     raw_rewards_or_advantages: torch.Tensor,
@@ -173,7 +186,7 @@ def compute_grpo_clip_loss(
     cliprange: float,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     r = torch.exp(policy_log_probs - old_log_probs)
-    loss = - torch.min(r * advantages, torch.clip(r, 1-cliprange, 1+cliprange) * advantages)
+    loss = -torch.min(r * advantages, torch.clip(r, 1-cliprange, 1+cliprange) * advantages)
     return loss, {}
 
 def compute_policy_gradient_loss(
