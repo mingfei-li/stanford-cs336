@@ -405,7 +405,7 @@ def main_ei():
         run.finish()
 
 
-def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
+def generate_grpo_train_batches(model, dataloader, tokenizer, config):
     model.eval()
     batches = []
     for batch in tqdm(dataloader, "batch_id"):
@@ -426,8 +426,7 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
         )
         batch["advantages"] = advantages.view(-1, 1).to(config["train_device"])
         batch["rewards"] = rewards.view(-1, 1).to(config["train_device"])
-        for k,v in metadata:
-            batch[k] = v.to(config["train_device"])
+        batch["metadata"] = metadata
         with torch.no_grad():
             results = get_response_log_probs(
                 model,
@@ -437,53 +436,69 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
             )
             batch["old_log_probs"] = results["log_probs"].to(config["train_device"])
         batches.append(batch)
+    return batches
 
+def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
+    batches = generate_grpo_train_batches(model, dataloader, tokenizer, config)
     model.train()
     optimizer.zero_grad()
-    train_loss = 0.
-    token_entropy = 0.
-    micro_step = 0
-
+    micro_batch_size = config["train_batch_size"] // config["gradient_accumulation_steps"]
     for _ in tqdm(range(config["n_epochs"]), "epoch"):
         for batch in batches:
-            micro_step += 1
-            results = get_response_log_probs(
-                model,
-                micro_batch["input_ids"],
-                micro_batch["labels"],
-                return_token_entropy=True,
-            )
-            token_entropy += aggregate_entropy(
-                results["token_entropy"],
-                micro_batch["response_mask"],
-                config["gradient_accumulation_steps"],
-            )
+            train_loss = 0.
+            token_entropy = 0.
+            clip_fraction = 0.
+            for start in range(0, config["train_batch_size"], micro_batch_size):
+                end = start + micro_batch_size
+                micro_batch = batch[start:end]
+                results = get_response_log_probs(
+                    model,
+                    micro_batch["input_ids"],
+                    micro_batch["labels"],
+                    return_token_entropy=True,
+                )
+                token_entropy += aggregate_entropy(
+                    results["token_entropy"],
+                    micro_batch["response_mask"],
+                    config["gradient_accumulation_steps"],
+                )
 
-            loss, _ = grpo_microbatch_train_step(
-                results["log_probs"],
-                micro_batch["response_mask"],
-                config["gradient_accumulation_steps"],
-                config["loss_type"],
-                rewards,
-                advantages,
-                micro_batch["old_log_probs"],
-                config["grpo_clip_range"],
-            )
-            train_loss += loss
+                loss, metadata = grpo_microbatch_train_step(
+                    results["log_probs"],
+                    micro_batch["response_mask"],
+                    config["gradient_accumulation_steps"],
+                    config["loss_type"],
+                    micro_batch["rewards"],
+                    micro_batch["advantages"],
+                    micro_batch["old_log_probs"],
+                    config["grpo_clip_range"],
+                )
+                train_loss += loss
+                if "clip_fraction" in metadata:
+                    clip_fraction += metadata["clip_fraction"]
 
-            if micro_step % config["gradient_accumulation_steps"] == 0:
-                train_step += 1
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
-                optimizer.zero_grad()
+            train_step += 1
+            with torch.no_grad():
+                grad_norm = 0.
+                for p in model.parameters():
+                    if p.grad is not None:
+                        grad_norm += torch.sum(p.grad**2)
+                grad_norm = grad_norm.item() ** 0.5
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+            optimizer.zero_grad()
 
-                wandb.log({
-                    "train/loss": train_loss,
-                    "train/token_entropy": token_entropy,
-                    "train_step": train_step,
-                })
-                train_loss = 0.
-                token_entropy = 0.
+            log_data = {
+                "train/loss": train_loss,
+                "train/grad_norm": grad_norm,
+                "train/token_entropy": token_entropy,
+                "train_step": train_step,
+            }
+            for k,v in batch["metadata"].items():
+                log_data[f"train/{k}"] = v
+            if config["loss_type"] == "grpo_clip":
+                log_data["train/clip_fraction"] = clip_fraction
+            wandb.log(log_data)
 
     return train_step
 
@@ -546,7 +561,7 @@ def main_grpo():
             model,
             llm,
             config,
-            config["grpo_train_data"],
+            config["train_data"],
             config["rollout_batch_size"] // config["group_size"],
             Path("grpo_rollouts") / config["exp_id"] / f"grpo_step={grpo_step}.jsonl",
             config["group_size"],
