@@ -156,7 +156,7 @@ def evaluate(config, policy, llm, eval_data, eval_step, train_step):
     sampling_params = SamplingParams(
         temperature=1.0,
         top_p=1.0,
-        max_tokens=config["max_seq_len"],
+        max_tokens=config["sampling_max_tokens"],
         stop=["</answer>"],
         include_stop_str_in_output=True,
     )
@@ -542,47 +542,49 @@ def main_grpo():
         config["gpu_memory_utilization"],
     )
 
-    config["exp_id"] = f"loss_type={config['loss_type']}"
+    for lr in [5e-5, 3e-5]:
+        config["exp_id"] = f"grpo_default,lr={lr}"
+        config["lr"] = lr
 
-    run = init(config)
-    model = AutoModelForCausalLM.from_pretrained(
-        config["model_id"],
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-    ).to(config["train_device"])
-    tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config["lr"],
-        weight_decay=config["weight_decay"],
-        betas=(0.9, 0.95),
-    )
-
-    eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
-    evaluate(config, model, llm, eval_data, 0, 0)
-
-    train_step = 0
-    for grpo_step in tqdm(range(config["n_grpo_steps"]), "grpo_step"):
-        rollout_data_path = Path("grpo_rollouts") / config["exp_id"] / f"grpo_step_{grpo_step}.jsonl"
-        sample_rollouts(
-            model,
-            llm,
-            config,
-            config["train_data"],
-            config["rollout_batch_size"] // config["group_size"],
-            rollout_data_path,
-            config["group_size"],
+        run = init(config)
+        model = AutoModelForCausalLM.from_pretrained(
+            config["model_id"],
+            torch_dtype=torch.bfloat16,
+            attn_implementation="flash_attention_2",
+        ).to(config["train_device"])
+        tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config["lr"],
+            weight_decay=config["weight_decay"],
+            betas=(0.9, 0.95),
         )
-        dataset = GRPODataset(rollout_data_path, config)
-        dataloader = DataLoader(
-            dataset,
-            batch_size=config["train_batch_size"] // config["gradient_accumulation_steps"],
-            shuffle=False,
-        )
-        train_step = train_grpo(model, optimizer, tokenizer, dataloader, config, train_step)
-        if (grpo_step+1) % config["eval_grpo_steps"] == 0:
-            evaluate(config, model, llm, eval_data, grpo_step+1, train_step)
-    run.finish()
+
+        eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
+        evaluate(config, model, llm, eval_data, 0, 0)
+
+        train_step = 0
+        for grpo_step in tqdm(range(config["n_grpo_steps"]), "grpo_step"):
+            rollout_data_path = Path("grpo_rollouts") / config["exp_id"] / f"grpo_step_{grpo_step}.jsonl"
+            sample_rollouts(
+                model,
+                llm,
+                config,
+                config["train_data"],
+                config["rollout_batch_size"] // config["group_size"],
+                rollout_data_path,
+                config["group_size"],
+            )
+            dataset = GRPODataset(rollout_data_path, config)
+            dataloader = DataLoader(
+                dataset,
+                batch_size=config["train_batch_size"] // config["gradient_accumulation_steps"],
+                shuffle=False,
+            )
+            train_step = train_grpo(model, optimizer, tokenizer, dataloader, config, train_step)
+            if (grpo_step+1) % config["eval_grpo_steps"] == 0:
+                evaluate(config, model, llm, eval_data, grpo_step+1, train_step)
+        run.finish()
 
 
 if __name__ == "__main__":
