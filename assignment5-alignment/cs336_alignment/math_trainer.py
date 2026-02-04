@@ -524,7 +524,7 @@ def main_grpo():
         "sampling_max_tokens": 1024,
         "epochs_per_rollout_batch": 1,
         "train_batch_size": 256,
-        "lr": 1e-5,
+        "lr": 3e-5,
         "weight_decay": 0.0,
         "gradient_accumulation_steps": 128,
         "gpu_memory_utilization": 0.85,
@@ -542,9 +542,9 @@ def main_grpo():
         config["gpu_memory_utilization"],
     )
 
-    for lr in [5e-5, 3e-5]:
-        config["exp_id"] = f"grpo_default,lr={lr}"
-        config["lr"] = lr
+    for loss_type in ["no_baseline", "reinforce_with_baseline"]:
+        config["exp_id"] = f"grpo_baselines_2:{loss_type}"
+        config["loss_type"] = loss_type
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
