@@ -22,7 +22,8 @@ def evaluate_vllm(
     output_dir = output_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    results = {"format_reward": 0., "answer_reward": 0., "reward": 0.}
+    n_rollouts = len(prompts) * eval_sampling_params.n
+    results = {"format_reward": 0., "answer_reward": 0., "reward": 0., "response_length": 0.}
     with open(output_path, "w") as f:
         for prompt, outputs_for_prompt, ground_truth in zip(prompts, outputs, ground_truths):
             for output in outputs_for_prompt.outputs:
@@ -33,9 +34,10 @@ def evaluate_vllm(
                 eval_result["response"] = response
                 f.write(json.dumps(eval_result) + "\n")
 
-                results["format_reward"] += eval_result["format_reward"] / len(prompts)
-                results["answer_reward"] += eval_result["answer_reward"] / len(prompts)
-                results["reward"] += eval_result["reward"] / len(prompts)
+                results["format_reward"] += eval_result["format_reward"] / n_rollouts
+                results["answer_reward"] += eval_result["answer_reward"] / n_rollouts
+                results["reward"] += eval_result["reward"] / n_rollouts
+                results["response_length"] += len(response) / n_rollouts
     return results
 
 def tokenize_prompt_and_output(
@@ -92,7 +94,8 @@ def get_response_log_probs(
     logits = model(input_ids).logits
     result = {"log_probs": compute_log_probs(logits, labels)}
     if return_token_entropy:
-        result["token_entropy"] = compute_entropy(logits)
+        with torch.no_grad():
+            result["token_entropy"] = compute_entropy(logits)
     return result
 
 def masked_normalize(
@@ -136,7 +139,7 @@ def aggregate_entropy(
         dim=-1,
     ) / response_mask.float().sum(dim=-1)
     entropy = per_response_entropy.sum() / (token_entropy.shape[0] * gradient_accumulation_steps)
-    return entropy
+    return entropy.item()
 
 
 def compute_group_normalized_rewards(
@@ -154,14 +157,14 @@ def compute_group_normalized_rewards(
     for response, ground_truth in zip(rollout_responses, repeated_ground_truths):
         results = reward_fn(response, ground_truth)
         rewards.append(results["reward"])
-        format_rewards.append(results["format_rewards"])
-        answer_rewards.append(results["answer_rewards"])
+        format_rewards.append(results["format_reward"])
+        answer_rewards.append(results["answer_reward"])
         response_len.append(len(response))
 
     metadata = {
-        "avg_format_rewards": torch.Tensor(format_rewards).mean(),
-        "avg_answer_rewards": torch.Tensor(answer_rewards).mean(),
-        "avg_response_len": torch.Tensor(response_len).mean(),
+        "format_rewards": torch.Tensor(format_rewards),
+        "answer_rewards": torch.Tensor(answer_rewards),
+        "response_len": torch.Tensor(response_len),
     }
 
     rewards = torch.Tensor(rewards).view(-1, group_size)
@@ -187,7 +190,8 @@ def compute_grpo_clip_loss(
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     r = torch.exp(policy_log_probs - old_log_probs)
     loss = -torch.min(r * advantages, torch.clip(r, 1-cliprange, 1+cliprange) * advantages)
-    is_clipped = (r*advantages) > (torch.clip(r, 1-cliprange, 1+cliprange)*advantages)
+    with torch.no_grad():
+        is_clipped = (r*advantages) > (torch.clip(r, 1-cliprange, 1+cliprange)*advantages)
     return loss, {"is_clipped": is_clipped}
 
 def compute_policy_gradient_loss(
@@ -212,6 +216,8 @@ def compute_policy_gradient_loss(
         ), {}
     else:
         assert loss_type == "grpo_clip"
+        assert old_log_probs is not None
+        assert cliprange is not None
         return compute_grpo_clip_loss(
             advantages,
             policy_log_probs,
@@ -251,5 +257,6 @@ def grpo_microbatch_train_step(
     if "is_clipped" in metadata:
         clip_fraction = torch.mean(masked_mean(
             metadata["is_clipped"], response_mask, dim=-1)) / gradient_accumulation_steps
+        metadata = {"clip_fraction": clip_fraction.item()}
     loss.backward()
-    return loss, {"clip_fraction": clip_fraction}
+    return loss.item(), metadata

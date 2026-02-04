@@ -28,7 +28,6 @@ class SFTDataset(Dataset):
     def __init__(self, file_path: os.PathLike):
         with open(file_path, "r") as f:
             self.data = [json.loads(line) for line in f]
-        self.data = [sample for sample in self.data]
 
     def __len__(self):
         return len(self.data)
@@ -37,12 +36,10 @@ class SFTDataset(Dataset):
         return self.data[index]["prompt"], self.data[index]["response"]
 
 class EIDataset(Dataset):
-    def __init__(self, rollouts: list[dict[str, str]]):
-        self.data = []
-        for rollout in rollouts:
-            rewards = r1_zero_reward_fn(rollout["response"], rollout["ground_truth"])
-            if rewards["reward"] > 0.: 
-                self.data.append(rollout)
+    def __init__(self, rollout_data_path: os.PathLike):
+        with open(rollout_data_path, "r") as f:
+            self.data = [json.loads(line) for line in f]
+        self.data = [rollout for rollout in self.data if rollout["reward"] == 1.0]
 
     def __len__(self):
         return len(self.data)
@@ -51,20 +48,31 @@ class EIDataset(Dataset):
         return self.data[index]["prompt"], self.data[index]["response"]
 
 class GRPODataset(Dataset):
-    def __init__(
-        self,
-        rollouts: list[dict[str, str]],
-    ):
-        self.data = rollouts
+    def __init__(self, rollout_data_path, config):
+        with open(rollout_data_path, "r") as f:
+            rollouts = [json.loads(line) for line in f]
 
+        self.prompts = [rollout["prompt"] for rollout in rollouts]
+        self.responses = [rollout["response"] for rollout in rollouts]
+
+        self.advantages, self.rewards, _ = compute_group_normalized_rewards(
+            r1_zero_reward_fn,
+            self.responses,
+            [rollout["ground_truth"] for rollout in rollouts],
+            config["group_size"],
+            config["advantage_eps"],
+            config["use_std_normalization"],
+        )
+        
     def __len__(self):
-        return len(self.data)
+        return len(self.prompts)
     
     def __getitem__(self, index):
         return (
-            self.data[index]["prompt"],
-            self.data[index]["response"],
-            self.data[index]["ground_truth"],
+            self.prompts[index],
+            self.responses[index],
+            self.advantages[index],
+            self.rewards[index],
         )
 
 def init_vllm(
@@ -164,6 +172,7 @@ def evaluate(config, policy, llm, eval_data, eval_step, train_step):
         "eval/format_reward": results["format_reward"],
         "eval/answer_reward": results["answer_reward"],
         "eval/reward": results["reward"],
+        "eval/response_length": results["response_length"],
         "eval/train_step_at_eval": train_step,
         "eval_step": eval_step,
     })
@@ -308,19 +317,14 @@ def sample_rollouts(
         n=n_rollouts_per_prompt,
     )
 
-    outputs = llm.generate(data["prompts"], sampling_params)
-    rollouts = []
-    with open(rollout_data_path, "w") as f:
-        for prompt, ground_truth, completion in zip(data["prompts"], data["ground_truths"], outputs):
-            for response in completion.outputs:
-                rollout = {
-                    "prompt": prompt,
-                    "ground_truth": ground_truth,
-                    "response": response,
-                }
-                rollouts.append(rollout)
-                f.write(json.dumps(rollout) + "\n")
-    return rollouts
+    evaluate_vllm(
+        llm,
+        r1_zero_reward_fn,
+        data["prompts"],
+        data["ground_truths"],
+        sampling_params,
+        rollout_data_path,
+    )
 
 def main_ei():
     config = {
@@ -343,7 +347,7 @@ def main_ei():
         "max_seq_len": 40960,
         "n_ei_steps": 5,
         "sampling_min_tokens": 4,
-        "sampling_max_tokens": 40960,
+        "sampling_max_tokens": 1024,
     }
 
     llm = init_vllm(
@@ -354,18 +358,19 @@ def main_ei():
     )
 
     hparams_to_sweep = [
-        [1024, 1, 3],
-        [512, 2, 3],
-        [512, 1, 6],
-        [256, 4, 3],
-        [256, 1, 12],
-        [256, 2, 6],
+        [256, 1, 1],
+        [512, 1, 1],
+        [1024, 1, 1],
+        [256, 2, 1],
+        [256, 3, 1],
+        [256, 1, 2],
+        [256, 1, 3]
     ]
-    for n_ei_samples, n_ei_rollouts, n_epochs in hparams_to_sweep:
-        config["n_ei_samples"] = n_ei_samples
-        config["n_ei_rollouts"] = n_ei_rollouts
+    for n_prompts, n_rollouts_per_prompt, n_epochs in hparams_to_sweep:
+        config["n_prompts"] = n_prompts
+        config["n_rollouts_per_prompt"] = n_rollouts_per_prompt
         config["n_epochs"] = n_epochs
-        config["exp_id"] = f"n_ei_samples={n_ei_samples},n_ei_rollouts={n_ei_rollouts},n_epochs={n_epochs}"
+        config["exp_id"] = f"n_prompts={n_prompts},n_rollouts_per_prompt={n_rollouts_per_prompt},n_epochs={n_epochs}"
         run = init(config)
 
         model = AutoModelForCausalLM.from_pretrained(
@@ -385,16 +390,17 @@ def main_ei():
 
         train_step = 0
         for ei_step in tqdm(range(config["n_ei_steps"]), "ei_step"):
-            rollouts = sample_rollouts(
+            rollout_data_path = Path("ei_rollouts") / config["exp_id"] / f"ei_step_{ei_step}.jsonl"
+            sample_rollouts(
                 model,
                 llm,
                 config,
                 config["train_data"],
-                config["n_ei_samples"],
-                Path("ei_rollouts") / config["exp_id"] / f"ei_step={ei_step}",
-                config["n_ei_rollouts"],
+                config["n_prompts"],
+                rollout_data_path,
+                config["n_rollouts_per_prompt"],
             )
-            dataset = EIDataset(rollouts)
+            dataset = EIDataset(rollout_data_path)
             dataloader = DataLoader(
                 dataset,
                 batch_size=config["micro_batch_size"],
@@ -404,101 +410,98 @@ def main_ei():
             evaluate(config, model, llm, eval_data, ei_step+1, train_step)
         run.finish()
 
+def compute_old_log_probs(model, dataloader, tokenizer, config):
+    if config["loss_type"] != "grpo_clip":
+        return None
 
-def generate_grpo_train_batches(model, dataloader, tokenizer, config):
-    model.eval()
-    batches = []
-    for batch in tqdm(dataloader, "batch_id"):
-        prompts, responses, ground_truths = batch
-        batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
-        batch = {
-            k:v[:,:config["max_seq_len"]].to(config["train_device"])
-            for k,v in batch.items()
-        }
-
-        advantages, rewards, metadata = compute_group_normalized_rewards(
-            r1_zero_reward_fn,
-            responses,
-            ground_truths,
-            config["group_size"],
-            config["advantage_eps"],
-            config["use_std_normalization"],
-        )
-        batch["advantages"] = advantages.view(-1, 1).to(config["train_device"])
-        batch["rewards"] = rewards.view(-1, 1).to(config["train_device"])
-        batch["metadata"] = metadata
-        with torch.no_grad():
+    old_log_probs = []
+    with torch.inference_mode():
+        for micro_batch in dataloader:
+            prompts, responses, _, _ = micro_batch
+            micro_batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
+            micro_batch = {
+                k:v[:,:config["max_seq_len"]].to(config["train_device"])
+                for k,v in micro_batch.items()
+            }
             results = get_response_log_probs(
                 model,
-                batch["input_ids"],
-                batch["labels"],
+                micro_batch["input_ids"],
+                micro_batch["labels"],
                 return_token_entropy=False,
             )
-            batch["old_log_probs"] = results["log_probs"].to(config["train_device"])
-        batches.append(batch)
-    return batches
+            old_log_probs.append(results["log_probs"])
+    return old_log_probs
 
 def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
-    batches = generate_grpo_train_batches(model, dataloader, tokenizer, config)
+    old_log_probs = compute_old_log_probs(model, dataloader, tokenizer, config)
+
     model.train()
     optimizer.zero_grad()
-    micro_batch_size = config["train_batch_size"] // config["gradient_accumulation_steps"]
-    for _ in tqdm(range(config["n_epochs"]), "epoch"):
-        for batch in batches:
-            train_loss = 0.
-            token_entropy = 0.
-            clip_fraction = 0.
-            for start in range(0, config["train_batch_size"], micro_batch_size):
-                end = start + micro_batch_size
-                micro_batch = batch[start:end]
-                results = get_response_log_probs(
-                    model,
-                    micro_batch["input_ids"],
-                    micro_batch["labels"],
-                    return_token_entropy=True,
-                )
-                token_entropy += aggregate_entropy(
-                    results["token_entropy"],
-                    micro_batch["response_mask"],
-                    config["gradient_accumulation_steps"],
-                )
+    train_loss = 0.
+    token_entropy = 0.
+    clip_fraction = 0.
+    micro_step = 0
+    for _ in tqdm(range(config["epochs_per_rollout_batch"]), "Training epoch"):
+        for micro_batch_id, micro_batch in enumerate(tqdm(dataloader, desc="Micro batch")):
+            micro_step +=1
 
-                loss, metadata = grpo_microbatch_train_step(
-                    results["log_probs"],
-                    micro_batch["response_mask"],
-                    config["gradient_accumulation_steps"],
-                    config["loss_type"],
-                    micro_batch["rewards"],
-                    micro_batch["advantages"],
-                    micro_batch["old_log_probs"],
-                    config["grpo_clip_range"],
-                )
-                train_loss += loss
-                if "clip_fraction" in metadata:
-                    clip_fraction += metadata["clip_fraction"]
-
-            train_step += 1
-            with torch.no_grad():
-                grad_norm = 0.
-                for p in model.parameters():
-                    if p.grad is not None:
-                        grad_norm += torch.sum(p.grad**2)
-                grad_norm = grad_norm.item() ** 0.5
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-            optimizer.step()
-            optimizer.zero_grad()
-
-            log_data = {
-                "train/loss": train_loss,
-                "train/grad_norm": grad_norm,
-                "train/token_entropy": token_entropy,
-                "train_step": train_step,
+            prompts, responses, advantages, rewards = micro_batch
+            micro_batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
+            micro_batch = {
+                k:v[:,:config["max_seq_len"]].to(config["train_device"])
+                for k,v in micro_batch.items()
             }
-            for k,v in batch["metadata"].items():
-                log_data[f"train/{k}"] = v
-            if config["loss_type"] == "grpo_clip":
-                log_data["train/clip_fraction"] = clip_fraction
-            wandb.log(log_data)
+            results = get_response_log_probs(
+                model,
+                micro_batch["input_ids"],
+                micro_batch["labels"],
+                return_token_entropy=True,
+            )
+            token_entropy += aggregate_entropy(
+                results["token_entropy"],
+                micro_batch["response_mask"],
+                config["gradient_accumulation_steps"],
+            )
+
+            loss, metadata = grpo_microbatch_train_step(
+                results["log_probs"],
+                micro_batch["response_mask"],
+                config["gradient_accumulation_steps"],
+                config["loss_type"],
+                rewards.view(-1, 1).to(config["train_device"]),
+                advantages.view(-1, 1).to(config["train_device"]),
+                old_log_probs[micro_batch_id] if old_log_probs is not None else None,
+                config["grpo_clip_range"],
+            )
+            train_loss += loss
+            if "clip_fraction" in metadata:
+                clip_fraction += metadata["clip_fraction"]
+
+            if (micro_step + 1) % config["gradient_accumulation_steps"] == 0:
+                train_step += 1
+                with torch.no_grad():
+                    grad_norm = 0.
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            grad_norm += torch.sum(p.grad**2)
+                    grad_norm = grad_norm.item() ** 0.5
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                optimizer.step()
+                optimizer.zero_grad()
+
+                log_data = {
+                    "train/loss": train_loss,
+                    "train/grad_norm": grad_norm,
+                    "train/token_entropy": token_entropy,
+                    "train_step": train_step,
+                }
+                if config["loss_type"] == "grpo_clip":
+                    log_data["train/clip_fraction"] = clip_fraction
+                wandb.log(log_data)
+
+                train_loss = 0.
+                token_entropy = 0.
+                clip_fraction = 0.
 
     return train_step
 
@@ -518,7 +521,7 @@ def main_grpo():
         "rollout_batch_size": 256,
         "group_size": 8,
         "sampling_min_tokens": 15,
-        "sampling_max_tokens": 40960,
+        "sampling_max_tokens": 1024,
         "epochs_per_rollout_batch": 1,
         "train_batch_size": 256,
         "lr": 1e-5,
@@ -527,7 +530,7 @@ def main_grpo():
         "gpu_memory_utilization": 0.85,
         "loss_type": "reinforce_with_baseline",
         "use_std_normalization": True,
-        "eval_grpo_steps": 2,
+        "eval_grpo_steps": 10,
         "n_eval_samples": 1024,
         "max_seq_len": 40960,
     }
@@ -538,6 +541,8 @@ def main_grpo():
         config["seed"],
         config["gpu_memory_utilization"],
     )
+
+    config["exp_id"] = f"loss_type={config['loss_type']}"
 
     run = init(config)
     model = AutoModelForCausalLM.from_pretrained(
@@ -550,6 +555,7 @@ def main_grpo():
         model.parameters(),
         lr=config["lr"],
         weight_decay=config["weight_decay"],
+        betas=(0.9, 0.95),
     )
 
     eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
@@ -557,22 +563,23 @@ def main_grpo():
 
     train_step = 0
     for grpo_step in tqdm(range(config["n_grpo_steps"]), "grpo_step"):
-        rollouts = sample_rollouts(
+        rollout_data_path = Path("grpo_rollouts") / config["exp_id"] / f"grpo_step_{grpo_step}.jsonl"
+        sample_rollouts(
             model,
             llm,
             config,
             config["train_data"],
             config["rollout_batch_size"] // config["group_size"],
-            Path("grpo_rollouts") / config["exp_id"] / f"grpo_step={grpo_step}.jsonl",
+            rollout_data_path,
             config["group_size"],
         )
-        dataset = GRPODataset(rollouts)
+        dataset = GRPODataset(rollout_data_path, config)
         dataloader = DataLoader(
             dataset,
-            batch_size=config["train_batch_size"],
+            batch_size=config["train_batch_size"] // config["gradient_accumulation_steps"],
             shuffle=False,
         )
-        train_step = train_grpo(model, optimizer, tokenizer, llm, dataloader, config, train_step)
+        train_step = train_grpo(model, optimizer, tokenizer, dataloader, config, train_step)
         if (grpo_step+1) % config["eval_grpo_steps"] == 0:
             evaluate(config, model, llm, eval_data, grpo_step+1, train_step)
     run.finish()
