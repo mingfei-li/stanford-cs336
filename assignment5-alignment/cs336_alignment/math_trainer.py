@@ -478,7 +478,7 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
             if "clip_fraction" in metadata:
                 clip_fraction += metadata["clip_fraction"]
 
-            if (micro_step + 1) % config["gradient_accumulation_steps"] == 0:
+            if micro_step % config["gradient_accumulation_steps"] == 0:
                 train_step += 1
                 with torch.no_grad():
                     grad_norm = 0.
@@ -516,7 +516,7 @@ def main_grpo():
         "inference_device": "cuda:0",
         "train_data": "MATH/train.jsonl",
         "eval_data": "MATH/validation.jsonl",
-        "n_grpo_steps": 200,
+        "n_grpo_steps": 30,
         "advantage_eps": 1e-6,
         "grpo_clip_range": 0.2,
         "rollout_batch_size": 256,
@@ -529,8 +529,8 @@ def main_grpo():
         "weight_decay": 0.0,
         "gradient_accumulation_steps": 128,
         "gpu_memory_utilization": 0.85,
-        "loss_type": "reinforce_with_baseline",
-        "use_std_normalization": True,
+        "loss_type": "grpo_clip",
+        "use_std_normalization": False,
         "eval_grpo_steps": 10,
         "n_eval_samples": 1024,
         "max_seq_len": 40960,
@@ -544,9 +544,21 @@ def main_grpo():
         config["gpu_memory_utilization"],
     )
 
-    for grpo_group_sd in [False]:
-        config["exp_id"] = f"grpo_group_standard_deviation:{grpo_group_sd}"
-        config["use_std_normalization"] = grpo_group_sd
+    configs_to_sweep = [
+        {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
+        {"epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+        {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
+        {"epochs_per_rollout_batch": 1, "train_batch_size": 64, "gradient_accumulation_steps": 32},
+        {"epochs_per_rollout_batch": 2, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+        {"epochs_per_rollout_batch": 4, "train_batch_size": 256},
+        {"epochs_per_rollout_batch": 4, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+        {"epochs_per_rollout_batch": 8, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+    ]
+
+    config_orig = config
+    for config_delta in configs_to_sweep:
+        config = config_orig | config_delta
+        config["exp_id"] = f"grpo_clip_limited_sweep:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
