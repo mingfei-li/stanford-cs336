@@ -244,6 +244,7 @@ def grpo_microbatch_train_step(
     advantages: torch.Tensor | None = None,
     old_log_probs: torch.Tensor | None = None,
     cliprange: float | None = None,
+    normalize_constant: float | None = None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
     loss, metadata = compute_policy_gradient_loss(
         policy_log_probs,
@@ -253,7 +254,15 @@ def grpo_microbatch_train_step(
         old_log_probs,
         cliprange,
     )
-    loss = torch.mean(masked_mean(loss, response_mask, dim=-1)) / gradient_accumulation_steps
+    if normalize_constant is None:
+        loss = torch.mean(masked_mean(loss, response_mask, dim=-1)) / gradient_accumulation_steps
+    else:
+        loss = torch.mean(masked_normalize(
+            loss,
+            response_mask,
+            normalize_constant,
+            dim=-1,
+        )) / gradient_accumulation_steps
     if "is_clipped" in metadata:
         clip_fraction = torch.mean(masked_mean(
             metadata["is_clipped"], response_mask, dim=-1)) / gradient_accumulation_steps

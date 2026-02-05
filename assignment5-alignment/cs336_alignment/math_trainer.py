@@ -472,6 +472,7 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
                 advantages.view(-1, 1).to(config["train_device"]),
                 old_log_probs[micro_batch_id] if old_log_probs is not None else None,
                 config["grpo_clip_range"],
+                config["sampling_max_tokens"] if config["use_length_normalization"] else None,
             )
             train_loss += loss
             if "clip_fraction" in metadata:
@@ -533,6 +534,7 @@ def main_grpo():
         "eval_grpo_steps": 10,
         "n_eval_samples": 1024,
         "max_seq_len": 40960,
+        "use_length_normalization": False,
     }
 
     llm = init_vllm(
@@ -542,9 +544,9 @@ def main_grpo():
         config["gpu_memory_utilization"],
     )
 
-    for loss_type in ["no_baseline", "reinforce_with_baseline"]:
-        config["exp_id"] = f"grpo_baselines_2:{loss_type}"
-        config["loss_type"] = loss_type
+    for length_normalization in [True]:
+        config["exp_id"] = f"grpo_length_normalization:{length_normalization}"
+        config["use_length_normalization"] = length_normalization
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
