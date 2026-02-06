@@ -516,7 +516,7 @@ def main_grpo():
         "inference_device": "cuda:0",
         "train_data": "MATH/train.jsonl",
         "eval_data": "MATH/validation.jsonl",
-        "n_grpo_steps": 30,
+        "n_grpo_steps": 50,
         "advantage_eps": 1e-6,
         "grpo_clip_range": 0.2,
         "rollout_batch_size": 256,
@@ -547,18 +547,16 @@ def main_grpo():
     configs_to_sweep = [
         {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
         {"epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
         {"epochs_per_rollout_batch": 1, "train_batch_size": 64, "gradient_accumulation_steps": 32},
+        {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
         {"epochs_per_rollout_batch": 2, "train_batch_size": 128, "gradient_accumulation_steps": 64},
         {"epochs_per_rollout_batch": 4, "train_batch_size": 256},
-        {"epochs_per_rollout_batch": 4, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        {"epochs_per_rollout_batch": 8, "train_batch_size": 128, "gradient_accumulation_steps": 64},
     ]
 
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
-        config["exp_id"] = f"grpo_clip_limited_sweep:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
+        config["exp_id"] = f"grpo_clip_limited_sweep_2:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
