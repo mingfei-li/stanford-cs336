@@ -48,14 +48,14 @@ class EIDataset(Dataset):
         return self.data[index]["prompt"], self.data[index]["response"]
 
 class GRPODataset(Dataset):
-    def __init__(self, rollout_data_path, config):
+    def __init__(self, rollout_data_path, config, train_step):
         with open(rollout_data_path, "r") as f:
             rollouts = [json.loads(line) for line in f]
 
         self.prompts = [rollout["prompt"] for rollout in rollouts]
         self.responses = [rollout["response"] for rollout in rollouts]
 
-        self.advantages, self.rewards, _ = compute_group_normalized_rewards(
+        self.advantages, self.rewards, metadata = compute_group_normalized_rewards(
             r1_zero_reward_fn,
             self.responses,
             [rollout["ground_truth"] for rollout in rollouts],
@@ -63,6 +63,23 @@ class GRPODataset(Dataset):
             config["advantage_eps"],
             config["use_std_normalization"],
         )
+
+        log_data = {
+            "train_step": train_step,
+        }
+        for k,v in metadata:
+            log_data[f"train/{k}"] = v
+        wandb.log(log_data)
+
+        rollout_data_dir = rollout_data_path.parent
+        rollout_data_file = rollout_data_path.name
+        updated_rollout_path = rollout_data_dir / "updated" / rollout_data_file
+        updated_rollout_path.mkdir(parents=True, exist_ok=True)
+        with open(updated_rollout_path, "w") as f:
+            for rollout, advantage, reward in zip(rollouts, self.advantages, self.rewards):
+                rollout["advantage"] = advantage
+                rollout["updated_reward"] = reward
+                f.write(rollout)
         
     def __len__(self):
         return len(self.prompts)
@@ -587,7 +604,7 @@ def main_grpo():
                 rollout_data_path,
                 config["group_size"],
             )
-            dataset = GRPODataset(rollout_data_path, config)
+            dataset = GRPODataset(rollout_data_path, config, train_step)
             dataloader = DataLoader(
                 dataset,
                 batch_size=config["train_batch_size"] // config["gradient_accumulation_steps"],

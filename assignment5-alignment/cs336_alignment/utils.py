@@ -2,6 +2,7 @@ from vllm import LLM, SamplingParams
 from transformers import PreTrainedTokenizerBase, PreTrainedModel
 from typing import Callable, Literal
 from pathlib import Path
+from collections import defaultdict
 import json
 import torch
 
@@ -153,27 +154,39 @@ def compute_group_normalized_rewards(
     rewards = []
     format_rewards = []
     answer_rewards = []
-    response_len = []
+    response_lens = []
     for response, ground_truth in zip(rollout_responses, repeated_ground_truths):
         results = reward_fn(response, ground_truth)
         rewards.append(results["reward"])
         format_rewards.append(results["format_reward"])
         answer_rewards.append(results["answer_reward"])
-        response_len.append(len(response))
-
-    metadata = {
-        "format_rewards": torch.Tensor(format_rewards),
-        "answer_rewards": torch.Tensor(answer_rewards),
-        "response_len": torch.Tensor(response_len),
-    }
+        response_lens.append(len(response))
 
     rewards = torch.Tensor(rewards).view(-1, group_size)
     mean_rewards = rewards.mean(dim=-1, keepdims=True)
+    std_rewards = rewards.std(dim=-1, keepdims=True)
     advantages = rewards - mean_rewards
     if normalize_by_std:
-        std_rewards = rewards.std(dim=-1, keepdims=True)
         advantages = advantages / (std_rewards + advantage_eps)
-    return advantages.view(-1), rewards.view(-1), metadata
+
+    advantages = advantages.view(-1)
+    rewards = rewards.view(-1)
+
+    with torch.no_grad():
+        metadata = {
+            "avg_group_reward_std": std_rewards.mean(),
+            "max_group_reward_std": std_rewards.max(),
+            "avg_rewards": rewards.mean(),
+            "avg_response_length": response_lens.mean(),
+        }
+        advantages_by_response_len_bucket = defaultdict(list)
+        for response_len, advantage in zip(response_lens, advantages):
+            bucket = response_len // 1000
+            advantages_by_response_len_bucket.append(advantage.item())
+        for bucket, advantages_for_bucket in advantages_by_response_len_bucket.items():
+            metadata[f"avg_advantage_for_bucket_{bucket}"] = advantages_for_bucket.mean()
+
+    return advantages, rewards, metadata
 
 def compute_naive_policy_gradient_loss(
     raw_rewards_or_advantages: torch.Tensor,
