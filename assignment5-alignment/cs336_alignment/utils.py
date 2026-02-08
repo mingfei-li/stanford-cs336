@@ -294,6 +294,7 @@ def grpo_microbatch_train_step(
         kl_term = masked_normalize(
             metadata["kl_term"],
             response_mask,
+            normalize_constant=1.0,
             dim=-1,
         )
         metadata = {

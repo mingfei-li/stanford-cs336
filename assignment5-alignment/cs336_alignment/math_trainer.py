@@ -178,6 +178,7 @@ def evaluate(config, policy, llm, eval_data, eval_step, train_step):
         max_tokens=config["sampling_max_tokens"],
         stop=["</answer>"],
         include_stop_str_in_output=True,
+        seed=config["seed"]
     )
     results = evaluate_vllm(
         llm,
@@ -334,6 +335,7 @@ def sample_rollouts(
         stop=["</answer>"],
         include_stop_str_in_output=True,
         n=n_rollouts_per_prompt,
+        seed=config["seed"],
     )
 
     evaluate_vllm(
@@ -467,6 +469,8 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
     optimizer.zero_grad()
     train_batch = defaultdict(list)
     train_batch_metadata = defaultdict(list)
+
+    micro_step = 0
     for _ in tqdm(range(config["epochs_per_rollout_batch"]), "Training epoch"):
         for micro_batch_id, micro_batch in enumerate(tqdm(dataloader, desc="Micro batch")):
             micro_step +=1
@@ -500,10 +504,10 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
                 config["sampling_max_tokens"] if config["use_constant_normalization"] else None,
             )
 
-            train_batch["prompts"].extend(prompts)
-            train_batch["responses"].extend(responses)
-            train_batch["advantages"].extend(advantages)
-            train_batch["rewards"].extend(rewards)
+            train_batch["prompt"].extend(prompts)
+            train_batch["response"].extend(responses)
+            train_batch["advantage"].extend([advantage.item() for advantage in advantages])
+            train_batch["reward"].extend([reward.item() for reward in rewards])
             train_batch_metadata["entropy"].extend(entropy.tolist())
             for k,v in metadata.items():
                 train_batch_metadata[k].extend(v.tolist())
@@ -512,7 +516,10 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
                 train_step += 1
 
                 pre_clip_grad_norm = compute_grad_norm(model)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                torch.nn.utils.clip_grad_norm_(
+                    model.parameters(),
+                    max_norm=config["grad_norm_clip_value"],
+                )
                 post_clip_grad_norm = compute_grad_norm(model)
 
                 optimizer.step()
@@ -524,12 +531,12 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
                     "train/post_clip_grad_norm": post_clip_grad_norm,
                 }
                 for k,v in train_batch_metadata.items():
-                    log_data[f"train/{k}"] = v.mean().item()
+                    log_data[f"train/{k}"] = torch.Tensor(v).mean().item()
                 wandb.log(log_data)
 
                 output_path = Path("grpo_train_batches") / config["exp_id"]
-                output_path.mkdir(parent=True, exist_ok=True)
-                with open(output_path / f"train_step_{train_step}".jsonl) as f:
+                output_path.mkdir(parents=True, exist_ok=True)
+                with open(output_path / f"train_step_{train_step}.jsonl", "w") as f:
                     for i in range(config["train_batch_size"]):
                         rollout = {}
                         for k,v in train_batch.items():
@@ -572,7 +579,15 @@ def main_grpo():
         "n_eval_samples": 1024,
         "max_seq_len": 40960,
         "use_constant_normalization": True,
+        "grad_norm_clip_value": 0.5,
     }
+
+    llm = init_vllm(
+        config["model_id"],
+        config["inference_device"],
+        config["seed"],
+        config["gpu_memory_utilization"],
+    )
 
     configs_to_sweep = [
         # {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
@@ -587,15 +602,9 @@ def main_grpo():
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
         #config["exp_id"] = "grpo_debug_1"
-        config["exp_id"] = f"grpo_debug:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
+        config["exp_id"] = f"grpo_debug_3:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
 
         run = init(config)
-        llm = init_vllm(
-            config["model_id"],
-            config["inference_device"],
-            config["seed"],
-            config["gpu_memory_utilization"],
-        )
         model = AutoModelForCausalLM.from_pretrained(
             config["model_id"],
             torch_dtype=torch.bfloat16,
