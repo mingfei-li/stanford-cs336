@@ -67,19 +67,19 @@ class GRPODataset(Dataset):
         log_data = {
             "train_step": train_step,
         }
-        for k,v in metadata:
+        for k,v in metadata.items():
             log_data[f"train/{k}"] = v
         wandb.log(log_data)
 
         rollout_data_dir = rollout_data_path.parent
         rollout_data_file = rollout_data_path.name
-        updated_rollout_path = rollout_data_dir / "updated" / rollout_data_file
-        updated_rollout_path.mkdir(parents=True, exist_ok=True)
-        with open(updated_rollout_path, "w") as f:
+        updated_rollout_dir = rollout_data_dir / "updated"
+        updated_rollout_dir.mkdir(parents=True, exist_ok=True)
+        with open(updated_rollout_dir / rollout_data_file, "w") as f:
             for rollout, advantage, reward in zip(rollouts, self.advantages, self.rewards):
-                rollout["advantage"] = advantage
-                rollout["updated_reward"] = reward
-                f.write(rollout)
+                rollout["advantage"] = advantage.item()
+                rollout["updated_reward"] = reward.item()
+                f.write(json.dumps(rollout) + "\n")
         
     def __len__(self):
         return len(self.prompts)
@@ -525,7 +525,7 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
 
 def main_grpo():
     config = {
-        "wandb_project": "cs336-assignment5-grpo",
+        "wandb_project": "cs336-assignment5-grpo-debug",
         "exp_id": "grpo",
         "seed": 42,
         "model_id": "Qwen/Qwen2.5-Math-1.5B",
@@ -554,15 +554,8 @@ def main_grpo():
         "use_constant_normalization": True,
     }
 
-    llm = init_vllm(
-        config["model_id"],
-        config["inference_device"],
-        config["seed"],
-        config["gpu_memory_utilization"],
-    )
-
     configs_to_sweep = [
-        {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
+        # {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
         {"epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
         {"epochs_per_rollout_batch": 1, "train_batch_size": 64, "gradient_accumulation_steps": 32},
         {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
@@ -573,9 +566,16 @@ def main_grpo():
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
-        config["exp_id"] = f"grpo_clip_limited_sweep_2:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
+        #config["exp_id"] = "grpo_debug_1"
+        config["exp_id"] = f"grpo_clip_limited_sweep:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
 
         run = init(config)
+        llm = init_vllm(
+            config["model_id"],
+            config["inference_device"],
+            config["seed"],
+            config["gpu_memory_utilization"],
+        )
         model = AutoModelForCausalLM.from_pretrained(
             config["model_id"],
             torch_dtype=torch.bfloat16,

@@ -176,15 +176,16 @@ def compute_group_normalized_rewards(
         metadata = {
             "avg_group_reward_std": std_rewards.mean(),
             "max_group_reward_std": std_rewards.max(),
+            "min_group_reward_std": std_rewards.min(),
             "avg_rewards": rewards.mean(),
-            "avg_response_length": response_lens.mean(),
+            "avg_response_length": torch.Tensor(response_lens).mean(),
         }
         advantages_by_response_len_bucket = defaultdict(list)
         for response_len, advantage in zip(response_lens, advantages):
             bucket = response_len // 1000
-            advantages_by_response_len_bucket.append(advantage.item())
+            advantages_by_response_len_bucket[bucket].append(advantage.item())
         for bucket, advantages_for_bucket in advantages_by_response_len_bucket.items():
-            metadata[f"avg_advantage_for_bucket_{bucket}"] = advantages_for_bucket.mean()
+            metadata[f"avg_advantage_for_bucket_{bucket}"] = torch.Tensor(advantages_for_bucket).mean().item()
 
     return advantages, rewards, metadata
 
