@@ -7,6 +7,7 @@ from vllm.model_executor import set_random_seed as vllm_set_random_seed
 from tqdm import tqdm
 from pathlib import Path
 from argparse import ArgumentParser
+from collections import defaultdict
 
 import os
 import json
@@ -16,6 +17,7 @@ import wandb
 
 from utils import (
     aggregate_entropy,
+    get_per_response_entropy,
     get_response_log_probs,
     tokenize_prompt_and_output,
     evaluate_vllm,
@@ -449,15 +451,22 @@ def compute_old_log_probs(model, dataloader, tokenizer, config):
             old_log_probs.append(results["log_probs"])
     return old_log_probs
 
+def compute_grad_norm(model):
+    with torch.no_grad():
+        grad_norm = 0.
+        for p in model.parameters():
+            if p.grad is not None:
+                grad_norm += torch.sum(p.grad**2)
+        grad_norm = grad_norm.item() ** 0.5
+    return grad_norm
+
 def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
     old_log_probs = compute_old_log_probs(model, dataloader, tokenizer, config)
 
     model.train()
     optimizer.zero_grad()
-    train_loss = 0.
-    token_entropy = 0.
-    clip_fraction = 0.
-    micro_step = 0
+    train_batch = defaultdict(list)
+    train_batch_metadata = defaultdict(list)
     for _ in tqdm(range(config["epochs_per_rollout_batch"]), "Training epoch"):
         for micro_batch_id, micro_batch in enumerate(tqdm(dataloader, desc="Micro batch")):
             micro_step +=1
@@ -474,10 +483,9 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
                 micro_batch["labels"],
                 return_token_entropy=True,
             )
-            token_entropy += aggregate_entropy(
+            entropy = get_per_response_entropy(
                 results["token_entropy"],
                 micro_batch["response_mask"],
-                config["gradient_accumulation_steps"],
             )
 
             loss, metadata = grpo_microbatch_train_step(
@@ -491,35 +499,47 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
                 config["grpo_clip_range"],
                 config["sampling_max_tokens"] if config["use_constant_normalization"] else None,
             )
-            train_loss += loss
-            if "clip_fraction" in metadata:
-                clip_fraction += metadata["clip_fraction"]
+
+            train_batch["prompts"].extend(prompts)
+            train_batch["responses"].extend(responses)
+            train_batch["advantages"].extend(advantages)
+            train_batch["rewards"].extend(rewards)
+            train_batch_metadata["entropy"].extend(entropy.tolist())
+            for k,v in metadata.items():
+                train_batch_metadata[k].extend(v.tolist())
 
             if micro_step % config["gradient_accumulation_steps"] == 0:
                 train_step += 1
-                with torch.no_grad():
-                    grad_norm = 0.
-                    for p in model.parameters():
-                        if p.grad is not None:
-                            grad_norm += torch.sum(p.grad**2)
-                    grad_norm = grad_norm.item() ** 0.5
+
+                pre_clip_grad_norm = compute_grad_norm(model)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                post_clip_grad_norm = compute_grad_norm(model)
+
                 optimizer.step()
                 optimizer.zero_grad()
 
                 log_data = {
-                    "train/loss": train_loss,
-                    "train/grad_norm": grad_norm,
-                    "train/token_entropy": token_entropy,
                     "train_step": train_step,
+                    "train/pre_clip_grad_norm": pre_clip_grad_norm,
+                    "train/post_clip_grad_norm": post_clip_grad_norm,
                 }
-                if config["loss_type"] == "grpo_clip":
-                    log_data["train/clip_fraction"] = clip_fraction
+                for k,v in train_batch_metadata.items():
+                    log_data[f"train/{k}"] = v.mean().item()
                 wandb.log(log_data)
 
-                train_loss = 0.
-                token_entropy = 0.
-                clip_fraction = 0.
+                output_path = Path("grpo_train_batches") / config["exp_id"]
+                output_path.mkdir(parent=True, exist_ok=True)
+                with open(output_path / f"train_step_{train_step}".jsonl) as f:
+                    for i in range(config["train_batch_size"]):
+                        rollout = {}
+                        for k,v in train_batch.items():
+                            rollout[k] = v[i]
+                        for k,v in train_batch_metadata.items():
+                            rollout[k] = v[i]
+                        f.write(json.dumps(rollout) + "\n")
+
+                train_batch = defaultdict(list)
+                train_batch_metadata = defaultdict(list)
 
     return train_step
 
@@ -567,7 +587,7 @@ def main_grpo():
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
         #config["exp_id"] = "grpo_debug_1"
-        config["exp_id"] = f"grpo_clip_limited_sweep:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
+        config["exp_id"] = f"grpo_debug:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
 
         run = init(config)
         llm = init_vllm(

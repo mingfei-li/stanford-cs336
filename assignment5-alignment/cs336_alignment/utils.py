@@ -1,3 +1,4 @@
+from math import e
 from vllm import LLM, SamplingParams
 from transformers import PreTrainedTokenizerBase, PreTrainedModel
 from typing import Callable, Literal
@@ -127,19 +128,30 @@ def sft_microbatch_train_step(
     loss.backward()
     return loss.item(), {}
 
+def get_per_response_entropy(
+    token_entropy: torch.Tensor,
+    response_mask: torch.Tensor,
+    normalize_constant: float = 1.0,
+) -> torch.Tensor:
+    return masked_normalize(
+        token_entropy,
+        response_mask,
+        normalize_constant,
+        dim=-1,
+    ) / response_mask.float().sum(dim=-1)
+
 def aggregate_entropy(
     token_entropy: torch.Tensor,
     response_mask: torch.Tensor,
     gradient_accumulation_steps: int,
     normalize_constant: float = 1.0,
 ) -> torch.Tensor:
-    per_response_entropy = masked_normalize(
+    entropy = get_per_response_entropy(
         token_entropy,
         response_mask,
         normalize_constant,
-        dim=-1,
-    ) / response_mask.float().sum(dim=-1)
-    entropy = per_response_entropy.sum() / (token_entropy.shape[0] * gradient_accumulation_steps)
+    )
+    entropy = entropy.mean() / gradient_accumulation_steps
     return entropy.item()
 
 
@@ -206,7 +218,8 @@ def compute_grpo_clip_loss(
     loss = -torch.min(r * advantages, torch.clip(r, 1-cliprange, 1+cliprange) * advantages)
     with torch.no_grad():
         is_clipped = (r*advantages) > (torch.clip(r, 1-cliprange, 1+cliprange)*advantages)
-    return loss, {"is_clipped": is_clipped}
+        kl_term = old_log_probs - policy_log_probs
+    return loss, {"is_clipped": is_clipped, "kl_term": kl_term}
 
 def compute_policy_gradient_loss(
     policy_log_probs: torch.Tensor,
@@ -269,17 +282,25 @@ def grpo_microbatch_train_step(
         cliprange,
     )
     if normalize_constant is None:
-        loss = torch.mean(masked_mean(loss, response_mask, dim=-1)) / gradient_accumulation_steps
+        loss = masked_mean(loss, response_mask, dim=-1)
     else:
-        loss = torch.mean(masked_normalize(
-            loss,
+        loss = masked_normalize(loss, response_mask, normalize_constant, dim=-1) 
+    if loss_type == "grpo_clip":
+        clip_fraction = masked_mean(
+            metadata["is_clipped"],
             response_mask,
-            normalize_constant,
             dim=-1,
-        )) / gradient_accumulation_steps
-    if "is_clipped" in metadata:
-        clip_fraction = torch.mean(masked_mean(
-            metadata["is_clipped"], response_mask, dim=-1)) / gradient_accumulation_steps
-        metadata = {"clip_fraction": clip_fraction.item()}
+        )
+        kl_term = masked_normalize(
+            metadata["kl_term"],
+            response_mask,
+            dim=-1,
+        )
+        metadata = {
+            "clip_fraction": clip_fraction,
+            "kl_term": kl_term,
+            "loss": loss.detach(),
+        }
+    loss = loss.mean() / gradient_accumulation_steps
     loss.backward()
-    return loss.item(), metadata
+    return loss, metadata
