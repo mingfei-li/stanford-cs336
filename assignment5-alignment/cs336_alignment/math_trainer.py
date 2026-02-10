@@ -435,13 +435,14 @@ def compute_old_log_probs(model, dataloader, tokenizer, config):
     if config["loss_type"] != "grpo_clip":
         return None
 
+    model.eval()
     old_log_probs = []
     with torch.inference_mode():
         for micro_batch in dataloader:
             prompts, responses, _, _ = micro_batch
             micro_batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
             micro_batch = {
-                k:v[:,:config["max_seq_len"]].to(config["train_device"])
+                k:v.to(config["train_device"])
                 for k,v in micro_batch.items()
             }
             results = get_response_log_probs(
@@ -478,7 +479,7 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
             prompts, responses, advantages, rewards = micro_batch
             micro_batch = tokenize_prompt_and_output(prompts, responses, tokenizer)
             micro_batch = {
-                k:v[:,:config["max_seq_len"]].to(config["train_device"])
+                k:v.to(config["train_device"])
                 for k,v in micro_batch.items()
             }
             results = get_response_log_probs(
@@ -570,14 +571,12 @@ def main_grpo():
         "epochs_per_rollout_batch": 1,
         "train_batch_size": 256,
         "lr": 3e-5,
-        "weight_decay": 0.0,
         "gradient_accumulation_steps": 128,
         "gpu_memory_utilization": 0.85,
         "loss_type": "grpo_clip",
         "use_std_normalization": False,
         "eval_grpo_steps": 10,
         "n_eval_samples": 1024,
-        "max_seq_len": 40960,
         "use_constant_normalization": False,
         "grad_norm_clip_value": 1.0,
     }
@@ -590,14 +589,20 @@ def main_grpo():
     )
 
     configs_to_sweep = [
-        # {"use_constant_normalization": False, "epochs_per_rollout_batch": 1, "train_batch_size": 256},
+        {
+            "use_constant_normalization": True,
+            "epochs_per_rollout_batch": 1,
+            "train_batch_size": 256,
+            "loss_type": "reinforce_with_baseline",
+        },
         # {"use_constant_normalization": False, "epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
         # {"lr": 1.5e-5, "epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
-        {"epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+        # {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
+        # {"epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
         # {"epochs_per_rollout_batch": 1, "train_batch_size": 64, "gradient_accumulation_steps": 32},
-        {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
-        {"epochs_per_rollout_batch": 2, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+        # {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
+        # {"epochs_per_rollout_batch": 3, "train_batch_size": 256},
+        # {"epochs_per_rollout_batch": 2, "train_batch_size": 128, "gradient_accumulation_steps": 64},
         # {"epochs_per_rollout_batch": 4, "train_batch_size": 256},
     ]
 
@@ -605,7 +610,7 @@ def main_grpo():
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
         #config["exp_id"] = "grpo_debug_1"
-        config["exp_id"] = f"grpo_off_policy_sweep:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
+        config["exp_id"] = f"reinforce_with_baseline+const_norm:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
@@ -617,7 +622,7 @@ def main_grpo():
         optimizer = torch.optim.AdamW(
             model.parameters(),
             lr=config["lr"],
-            weight_decay=config["weight_decay"],
+            weight_decay=0.0,
             betas=(0.9, 0.95),
         )
 
