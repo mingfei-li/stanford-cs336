@@ -552,7 +552,7 @@ def train_grpo(model, optimizer, tokenizer, dataloader, config, train_step):
 
 def main_grpo():
     config = {
-        "wandb_project": "cs336-assignment5-grpo-debug",
+        "wandb_project": "cs336-assignment5-grpo",
         "exp_id": "grpo",
         "seed": 42,
         "model_id": "Qwen/Qwen2.5-Math-1.5B",
@@ -560,7 +560,7 @@ def main_grpo():
         "inference_device": "cuda:0",
         "train_data": "MATH/train.jsonl",
         "eval_data": "MATH/validation.jsonl",
-        "n_grpo_steps": 50,
+        "n_grpo_steps": 200,
         "advantage_eps": 1e-6,
         "grpo_clip_range": 0.2,
         "rollout_batch_size": 256,
@@ -578,8 +578,8 @@ def main_grpo():
         "eval_grpo_steps": 10,
         "n_eval_samples": 1024,
         "max_seq_len": 40960,
-        "use_constant_normalization": True,
-        "grad_norm_clip_value": 0.5,
+        "use_constant_normalization": False,
+        "grad_norm_clip_value": 1.0,
     }
 
     llm = init_vllm(
@@ -590,19 +590,22 @@ def main_grpo():
     )
 
     configs_to_sweep = [
-        # {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
+        # {"use_constant_normalization": False, "epochs_per_rollout_batch": 1, "train_batch_size": 256},
+        # {"use_constant_normalization": False, "epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+        # {"lr": 1.5e-5, "epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
+        {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
         {"epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        {"epochs_per_rollout_batch": 1, "train_batch_size": 64, "gradient_accumulation_steps": 32},
+        # {"epochs_per_rollout_batch": 1, "train_batch_size": 64, "gradient_accumulation_steps": 32},
         {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
         {"epochs_per_rollout_batch": 2, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        {"epochs_per_rollout_batch": 4, "train_batch_size": 256},
+        # {"epochs_per_rollout_batch": 4, "train_batch_size": 256},
     ]
 
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
         #config["exp_id"] = "grpo_debug_1"
-        config["exp_id"] = f"grpo_debug_3:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
+        config["exp_id"] = f"grpo_off_policy_sweep:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
