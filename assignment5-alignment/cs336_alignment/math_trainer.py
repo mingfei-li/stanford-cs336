@@ -566,15 +566,15 @@ def main_grpo():
         "grpo_clip_range": 0.2,
         "rollout_batch_size": 256,
         "group_size": 8,
-        "sampling_min_tokens": 15,
+        "sampling_min_tokens": 4,
         "sampling_max_tokens": 1024,
         "epochs_per_rollout_batch": 1,
         "train_batch_size": 256,
         "lr": 3e-5,
         "gradient_accumulation_steps": 128,
         "gpu_memory_utilization": 0.85,
-        "loss_type": "grpo_clip",
-        "use_std_normalization": False,
+        "loss_type": "reinforce_with_baseline",
+        "use_std_normalization": True,
         "eval_grpo_steps": 10,
         "n_eval_samples": 1024,
         "use_constant_normalization": False,
@@ -589,28 +589,17 @@ def main_grpo():
     )
 
     configs_to_sweep = [
-        {
-            "use_constant_normalization": True,
-            "epochs_per_rollout_batch": 1,
-            "train_batch_size": 256,
-            "loss_type": "reinforce_with_baseline",
-        },
-        # {"use_constant_normalization": False, "epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        # {"lr": 1.5e-5, "epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        # {"epochs_per_rollout_batch": 1, "train_batch_size": 256},
-        # {"epochs_per_rollout_batch": 1, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        # {"epochs_per_rollout_batch": 1, "train_batch_size": 64, "gradient_accumulation_steps": 32},
-        # {"epochs_per_rollout_batch": 2, "train_batch_size": 256},
-        # {"epochs_per_rollout_batch": 3, "train_batch_size": 256},
-        # {"epochs_per_rollout_batch": 2, "train_batch_size": 128, "gradient_accumulation_steps": 64},
-        # {"epochs_per_rollout_batch": 4, "train_batch_size": 256},
+        # {"lr": 1e-4},
+        # {"lr": 7e-5},
+        # {"lr": 5e-5},
+        {"lr": 3e-5},
+        {"lr": 1e-5},
     ]
 
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
-        #config["exp_id"] = "grpo_debug_1"
-        config["exp_id"] = f"reinforce_with_baseline+const_norm:n_epochs={config['epochs_per_rollout_batch']},train_bs={config['train_batch_size']}"
+        config["exp_id"] = f"grpo_learning_rate:lr={config['lr']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
