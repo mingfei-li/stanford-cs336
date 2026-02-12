@@ -14,6 +14,7 @@ import json
 import random
 import torch
 import wandb
+import numpy as np
 
 from utils import (
     aggregate_entropy,
@@ -148,6 +149,7 @@ def init(config):
     wandb.define_metric("eval/*", step_metric="eval_step")
 
     random.seed(config["seed"])
+    np.random.seed(config["seed"])
     torch.manual_seed(config["seed"])
     torch.cuda.manual_seed_all(config["seed"])
     return run
@@ -570,7 +572,7 @@ def main_grpo():
         "sampling_max_tokens": 1024,
         "epochs_per_rollout_batch": 1,
         "train_batch_size": 256,
-        "lr": 3e-5,
+        "lr": 2e-5,
         "gradient_accumulation_steps": 128,
         "gpu_memory_utilization": 0.85,
         "loss_type": "reinforce_with_baseline",
@@ -589,17 +591,36 @@ def main_grpo():
     )
 
     configs_to_sweep = [
-        # {"lr": 1e-4},
-        # {"lr": 7e-5},
-        # {"lr": 5e-5},
-        {"lr": 3e-5},
-        {"lr": 1e-5},
+        #{"lr": 1e-4, "seed": 42},
+        # {"lr": 1e-4, "seed": 0},
+        # {"lr": 1e-4, "seed": 1},
+        # {"lr": 7e-5, "seed": 42},
+        # {"lr": 7e-5, "seed": 0},
+        # {"lr": 7e-5, "seed": 1},
+        # {"lr": 5e-5, "seed": 0},
+        # {"lr": 5e-5, "seed": 1},
+        # {"lr": 3e-5, "seed": 0},
+        # {"lr": 3e-5, "seed": 1},
+        # {"lr": 2e-5, "seed": 0},
+        # {"lr": 2e-5, "seed": 1},
+        # {"lr": 2e-5, "seed": 42},
+        # {"lr": 1e-5, "seed": 0},
+        {"lr": 1e-5, "seed": 1},
+        # {"loss_type": "no_baseline", "seed": 0},
+        # {"loss_type": "no_baseline", "seed": 1},
+        # {"loss_type": "no_baseline", "seed": 42},
+        # {"use_constant_normalization": True, "seed": 0},
+        # {"use_constant_normalization": True, "seed": 1},
+        # {"use_constant_normalization": True, "seed": 42},
+        # {"use_std_normalization": False, "seed": 0},
+        # {"use_std_normalization": False, "seed": 1},
+        # {"use_std_normalization": False, "seed": 42},
     ]
 
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
-        config["exp_id"] = f"grpo_learning_rate:lr={config['lr']}"
+        config["exp_id"] = f"grpo_learning_rate_3:lr={config['lr']},seed={config['seed']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
