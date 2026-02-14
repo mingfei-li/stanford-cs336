@@ -190,7 +190,10 @@ def compute_group_normalized_rewards(
             "max_group_reward_std": std_rewards.max(),
             "min_group_reward_std": std_rewards.min(),
             "avg_rewards": rewards.mean(),
+            "avg_format_rewards": torch.Tensor(format_rewards).mean(),
+            "avg_answer_rewards": torch.Tensor(answer_rewards).mean(),
             "avg_response_length": torch.Tensor(response_lens).mean(),
+            "rollout_batch_size": rewards.shape[0],
         }
         advantages_by_response_len_bucket = defaultdict(list)
         for response_len, advantage in zip(response_lens, advantages):
@@ -300,8 +303,8 @@ def grpo_microbatch_train_step(
         metadata = {
             "clip_fraction": clip_fraction,
             "kl_term": kl_term,
-            "loss": loss.detach(),
         }
+    metadata["loss"] = loss.detach()
     loss = loss.mean() / gradient_accumulation_steps
     loss.backward()
     return loss, metadata

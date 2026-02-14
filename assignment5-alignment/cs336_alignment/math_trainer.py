@@ -605,7 +605,7 @@ def main_grpo():
         # {"lr": 2e-5, "seed": 1},
         # {"lr": 2e-5, "seed": 42},
         # {"lr": 1e-5, "seed": 0},
-        {"lr": 1e-5, "seed": 1},
+        # {"lr": 1e-5, "seed": 1},
         # {"loss_type": "no_baseline", "seed": 0},
         # {"loss_type": "no_baseline", "seed": 1},
         # {"loss_type": "no_baseline", "seed": 42},
@@ -614,13 +614,13 @@ def main_grpo():
         # {"use_constant_normalization": True, "seed": 42},
         # {"use_std_normalization": False, "seed": 0},
         # {"use_std_normalization": False, "seed": 1},
-        # {"use_std_normalization": False, "seed": 42},
+        {"use_std_normalization": False, "seed": 42},
     ]
 
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
-        config["exp_id"] = f"grpo_learning_rate_3:lr={config['lr']},seed={config['seed']}"
+        config["exp_id"] = f"grpo_group_standard_deviation:use_std_normalization={config['use_std_normalization']},seed={config['seed']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
