@@ -575,8 +575,8 @@ def main_grpo():
         "lr": 2e-5,
         "gradient_accumulation_steps": 128,
         "gpu_memory_utilization": 0.85,
-        "loss_type": "reinforce_with_baseline",
-        "use_std_normalization": True,
+        "loss_type": "grpo_clip",
+        "use_std_normalization": False,
         "eval_grpo_steps": 10,
         "n_eval_samples": 1024,
         "use_constant_normalization": False,
@@ -614,13 +614,43 @@ def main_grpo():
         # {"use_constant_normalization": True, "seed": 42},
         # {"use_std_normalization": False, "seed": 0},
         # {"use_std_normalization": False, "seed": 1},
-        {"use_std_normalization": False, "seed": 42},
+        # {"use_std_normalization": False, "seed": 42},
+        # {
+        #     "epochs_per_rollout_batch": 1,
+        #     "train_batch_size": 256,
+        #     "gradient_accumulation_steps": 128,
+        # },
+        # {
+        #     "epochs_per_rollout_batch": 2,
+        #     "train_batch_size": 256,
+        #     "gradient_accumulation_steps": 128,
+        # },
+        # {
+        #     "epochs_per_rollout_batch": 4,
+        #     "train_batch_size": 256,
+        #     "gradient_accumulation_steps": 128,
+        # },
+        # {
+        #     "epochs_per_rollout_batch": 1,
+        #     "train_batch_size": 128,
+        #     "gradient_accumulation_steps": 64,
+        # },
+        # {
+        #     "epochs_per_rollout_batch": 1,
+        #     "train_batch_size": 64,
+        #     "gradient_accumulation_steps": 32,
+        # },
+        {
+            "epochs_per_rollout_batch": 2,
+            "train_batch_size": 128,
+            "gradient_accumulation_steps": 64,
+        },
     ]
 
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
-        config["exp_id"] = f"grpo_group_standard_deviation:use_std_normalization={config['use_std_normalization']},seed={config['seed']}"
+        config["exp_id"] = f"grpo_off_policy_sweep_long:n_epochs={config['epochs_per_rollout_batch']},train_batch_size={config['train_batch_size']},seed={config['seed']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
