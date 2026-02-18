@@ -615,11 +615,11 @@ def main_grpo():
         # {"use_std_normalization": False, "seed": 0},
         # {"use_std_normalization": False, "seed": 1},
         # {"use_std_normalization": False, "seed": 42},
-        {
-            "epochs_per_rollout_batch": 1,
-            "train_batch_size": 256,
-            "gradient_accumulation_steps": 128,
-        },
+        # {
+        #     "epochs_per_rollout_batch": 1,
+        #     "train_batch_size": 256,
+        #     "gradient_accumulation_steps": 128,
+        # },
         # {
         #     "epochs_per_rollout_batch": 2,
         #     "train_batch_size": 256,
@@ -645,6 +645,11 @@ def main_grpo():
         #     "train_batch_size": 128,
         #     "gradient_accumulation_steps": 64,
         # },
+        {
+            "epochs_per_rollout_batch": 4,
+            "train_batch_size": 128,
+            "gradient_accumulation_steps": 64,
+        }
     ]
 
     config_orig = config
