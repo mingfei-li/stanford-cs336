@@ -237,7 +237,11 @@ def train(model, optimizer, tokenizer, dataloader, config, train_step):
 
             if micro_step % config["gradient_accumulation_steps"] == 0:
                 train_step += 1
+
+                pre_clip_grad_norm = compute_grad_norm(model)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                post_clip_grad_norm = compute_grad_norm(model)
+
                 optimizer.step()
                 optimizer.zero_grad()
 
@@ -245,6 +249,8 @@ def train(model, optimizer, tokenizer, dataloader, config, train_step):
                     "train/loss": train_loss,
                     "train/token_entropy": token_entropy,
                     "train_step": train_step,
+                    "train/pre_clip_grad_norm": pre_clip_grad_norm,
+                    "train/post_clip_grad_norm": post_clip_grad_norm,
                 })
                 train_loss = 0.
                 token_entropy = 0.
@@ -390,19 +396,18 @@ def main_ei():
     )
 
     hparams_to_sweep = [
-        [256, 1, 1],
-        [512, 1, 1],
         [1024, 1, 1],
-        [256, 2, 1],
-        [256, 3, 1],
-        [256, 1, 2],
-        [256, 1, 3]
+        [512, 2, 1],
+        [512, 1, 2],
+        [256, 1, 4],
+        [256, 2, 2],
+        [256, 4, 1],
     ]
     for n_prompts, n_rollouts_per_prompt, n_epochs in hparams_to_sweep:
         config["n_prompts"] = n_prompts
         config["n_rollouts_per_prompt"] = n_rollouts_per_prompt
         config["n_epochs"] = n_epochs
-        config["exp_id"] = f"n_prompts={n_prompts},n_rollouts_per_prompt={n_rollouts_per_prompt},n_epochs={n_epochs}"
+        config["exp_id"] = f"ei_exp:n_prompts={n_prompts},n_rollouts_per_prompt={n_rollouts_per_prompt},n_epochs={n_epochs}"
         run = init(config)
 
         model = AutoModelForCausalLM.from_pretrained(
