@@ -224,6 +224,17 @@ def compute_grpo_clip_loss(
         kl_term = old_log_probs - policy_log_probs
     return loss, {"is_clipped": is_clipped, "kl_term": kl_term}
 
+def compute_grpo_no_clip_loss(
+    advantages: torch.Tensor,
+    policy_log_probs: torch.Tensor,
+    old_log_probs: torch.Tensor,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    r = torch.exp(policy_log_probs - old_log_probs)
+    loss = r * advantages
+    with torch.no_grad():
+        kl_term = old_log_probs - policy_log_probs
+    return loss, {"kl_term": kl_term}
+
 def compute_policy_gradient_loss(
     policy_log_probs: torch.Tensor,
     loss_type: Literal["no_baseline", "reinforce_with_baseline", "grpo_clip"],
@@ -244,6 +255,13 @@ def compute_policy_gradient_loss(
             advantages,
             policy_log_probs,
         ), {}
+    elif loss_type == "grpo_no_clip":
+        assert old_log_probs is not None
+        return compute_grpo_no_clip_loss(
+            advantages,
+            policy_log_probs,
+            old_log_probs,
+        )
     else:
         assert loss_type == "grpo_clip"
         assert old_log_probs is not None
@@ -304,6 +322,17 @@ def grpo_microbatch_train_step(
             "clip_fraction": clip_fraction,
             "kl_term": kl_term,
         }
+    elif loss_type == "grpo_no_clip":
+        kl_term = masked_normalize(
+            metadata["kl_term"],
+            response_mask,
+            normalize_constant=1.0,
+            dim=-1,
+        )
+        metadata = {
+            "kl_term": kl_term,
+        }
+
     metadata["loss"] = loss.detach()
     loss = loss.mean() / gradient_accumulation_steps
     loss.backward()

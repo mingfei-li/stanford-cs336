@@ -1,4 +1,4 @@
-from drgrpo_grader import r1_zero_reward_fn
+from drgrpo_grader import r1_zero_reward_fn, question_only_reward_fn
 from transformers import AutoModelForCausalLM, AutoTokenizer, PreTrainedModel
 from torch.utils.data import Dataset, DataLoader, Subset
 from unittest.mock import patch
@@ -59,7 +59,7 @@ class GRPODataset(Dataset):
         self.responses = [rollout["response"] for rollout in rollouts]
 
         self.advantages, self.rewards, metadata = compute_group_normalized_rewards(
-            r1_zero_reward_fn,
+            config["reward_fn"],
             self.responses,
             [rollout["ground_truth"] for rollout in rollouts],
             config["group_size"],
@@ -154,8 +154,8 @@ def init(config):
     torch.cuda.manual_seed_all(config["seed"])
     return run
 
-def load_from_raw_dataset(path, n_samples):
-    with open("prompts/r1_zero.prompt") as f:
+def load_from_raw_dataset(path, n_samples, prompt_template_path):
+    with open(prompt_template_path, "r") as f:
         prompt_template = f.read()
     samples = []
     with open(path, "r") as f:
@@ -184,7 +184,7 @@ def evaluate(config, policy, llm, eval_data, eval_step, train_step):
     )
     results = evaluate_vllm(
         llm,
-        r1_zero_reward_fn,
+        config["reward_fn"],
         eval_data["prompts"],
         eval_data["ground_truths"],
         sampling_params,
@@ -270,6 +270,8 @@ def main_sft():
         "n_sft_samples": 256,
         "n_eval_samples": 100,
         "max_seq_len": 40960,
+        "prompt_template": "prompts/r1_zero.prompt",
+        "reward_fn": r1_zero_reward_fn,
     }
 
     llm = init_vllm(
@@ -278,7 +280,11 @@ def main_sft():
         config["seed"],
         0.65,
     )
-    eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
+    eval_data = load_from_raw_dataset(
+        config["eval_data"],
+        config["n_eval_samples"],
+        config["prompt_template"],
+    )
     for lr in [1e-4, 1e-5, 1e-6]:
         for gradient_accumulation_steps in [16, 32, 64]:
             for n_sft_samples in [128, 256, 512, 1024]:
@@ -326,6 +332,7 @@ def sample_rollouts(
     data = load_from_raw_dataset(
         prompt_data_path,
         n_prompts,
+        config["prompt_template"],
     )
 
     load_policy_into_vllm_instance(policy, llm)
@@ -342,7 +349,7 @@ def sample_rollouts(
 
     evaluate_vllm(
         llm,
-        r1_zero_reward_fn,
+        config["reward_fn"],
         data["prompts"],
         data["ground_truths"],
         sampling_params,
@@ -371,6 +378,8 @@ def main_ei():
         "n_ei_steps": 5,
         "sampling_min_tokens": 4,
         "sampling_max_tokens": 1024,
+        "prompt_template": "prompts/r1_zero.prompt",
+        "reward_fn": r1_zero_reward_fn,
     }
 
     llm = init_vllm(
@@ -408,7 +417,11 @@ def main_ei():
         )
         tokenizer = AutoTokenizer.from_pretrained(config["model_id"])
 
-        eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
+        eval_data = load_from_raw_dataset(
+            config["eval_data"],
+            config["n_eval_samples"],
+            config["prompt_template"],
+        )
         evaluate(config, model, llm, eval_data, 0, 0)
 
         train_step = 0
@@ -434,7 +447,7 @@ def main_ei():
         run.finish()
 
 def compute_old_log_probs(model, dataloader, tokenizer, config):
-    if config["loss_type"] != "grpo_clip":
+    if not config["loss_type"].startswith("grpo_"):
         return None
 
     model.eval()
@@ -581,6 +594,8 @@ def main_grpo():
         "n_eval_samples": 1024,
         "use_constant_normalization": False,
         "grad_norm_clip_value": 1.0,
+        "prompt_template": "prompts/r1_zero.prompt",
+        "reward_fn": r1_zero_reward_fn,
     }
 
     llm = init_vllm(
@@ -630,11 +645,13 @@ def main_grpo():
         #     "train_batch_size": 256,
         #     "gradient_accumulation_steps": 128,
         # },
-        # {
-        #     "epochs_per_rollout_batch": 1,
-        #     "train_batch_size": 128,
-        #     "gradient_accumulation_steps": 64,
-        # },
+        {
+            "epochs_per_rollout_batch": 1,
+            "train_batch_size": 128,
+            "gradient_accumulation_steps": 64,
+            "prompt_template": "prompts/question_only.prompt",
+            "reward_fn": question_only_reward_fn,
+        },
         # {
         #     "epochs_per_rollout_batch": 1,
         #     "train_batch_size": 64,
@@ -645,17 +662,17 @@ def main_grpo():
         #     "train_batch_size": 128,
         #     "gradient_accumulation_steps": 64,
         # },
-        {
-            "epochs_per_rollout_batch": 4,
-            "train_batch_size": 128,
-            "gradient_accumulation_steps": 64,
-        }
+        # {
+        #     "epochs_per_rollout_batch": 4,
+        #     "train_batch_size": 128,
+        #     "gradient_accumulation_steps": 64,
+        # }
     ]
 
     config_orig = config
     for config_delta in configs_to_sweep:
         config = config_orig | config_delta
-        config["exp_id"] = f"grpo_off_policy_sweep_long:n_epochs={config['epochs_per_rollout_batch']},train_batch_size={config['train_batch_size']},seed={config['seed']}"
+        config["exp_id"] = f"grpo_prompt_ablation:seed={config['seed']}"
 
         run = init(config)
         model = AutoModelForCausalLM.from_pretrained(
@@ -671,7 +688,11 @@ def main_grpo():
             betas=(0.9, 0.95),
         )
 
-        eval_data = load_from_raw_dataset(config["eval_data"], config["n_eval_samples"])
+        eval_data = load_from_raw_dataset(
+            config["eval_data"],
+            config["n_eval_samples"],
+            config["prompt_template"],
+        )
         evaluate(config, model, llm, eval_data, 0, 0)
 
         train_step = 0
