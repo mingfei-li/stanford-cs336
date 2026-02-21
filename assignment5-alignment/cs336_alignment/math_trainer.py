@@ -276,6 +276,8 @@ def main_sft():
         "n_sft_samples": 256,
         "n_eval_samples": 100,
         "max_seq_len": 40960,
+        "sampling_min_tokens": 4,
+        "sampling_max_tokens": 1024,
         "prompt_template": "prompts/r1_zero.prompt",
         "reward_fn": r1_zero_reward_fn,
     }
@@ -293,11 +295,11 @@ def main_sft():
     )
     for lr in [1e-4, 1e-5, 1e-6]:
         for gradient_accumulation_steps in [16, 32, 64]:
-            for n_sft_samples in [128, 256, 512, 1024]:
+            for n_sft_samples in [0]:#, 128, 256, 512, 1024]:
                 config["n_sft_samples"] = n_sft_samples
                 config["lr"] = lr
                 config["gradient_accumulation_steps"] = gradient_accumulation_steps
-                config["exp_id"] = f"lr={lr}, batch_size={gradient_accumulation_steps}, n_sft_samples={n_sft_samples}"
+                config["exp_id"] = f"sft_exp:lr={lr}, batch_size={gradient_accumulation_steps}, n_sft_samples={n_sft_samples}"
                 run = init(config)
 
                 model = AutoModelForCausalLM.from_pretrained(
