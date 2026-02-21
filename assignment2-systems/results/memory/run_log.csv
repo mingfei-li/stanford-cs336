@@ -1,0 +1,13 @@
+mode,context_length,mixed_precision,rc
+forward,128,off,0
+forward,128,on,0
+forward,256,off,0
+forward,256,on,0
+forward,512,off,1
+forward,512,on,0
+train_step,128,off,1
+train_step,128,on,1
+train_step,256,off,1
+train_step,256,on,1
+train_step,512,off,1
+train_step,512,on,1

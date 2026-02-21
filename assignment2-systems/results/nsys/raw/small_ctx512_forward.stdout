@@ -1,0 +1,4 @@
+done mode=forward model=small ctx=512 dtype=float32 warmup=5 profile_steps=1
+Generating '/tmp/nsys-report-3fe9.qdstrm'
+Generated:
+    /workspace/stanford-cs336/assignment2-systems/results/nsys/raw/small_ctx512_forward.qdstrm

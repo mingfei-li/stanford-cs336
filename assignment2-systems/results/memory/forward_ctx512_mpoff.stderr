@@ -1,0 +1,45 @@
+Traceback (most recent call last):
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 276, in <module>
+    main()
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 217, in main
+    _run_single_iteration(
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 151, in _run_single_iteration
+    y = model(x)
+        ^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py", line 285, in forward
+    x = layer(x)
+        ^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py", line 249, in forward
+    x = x + self.attn(self.ln1(x))
+                      ^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py", line 62, in forward
+    x = einsum(x, 1/norm,  self.weight, "... d_model, ..., d_model -> ... d_model")
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/einops/einops.py", line 916, in einsum
+    return get_backend(tensors[0]).einsum(pattern, *tensors)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/einops/_backends.py", line 288, in einsum
+    return self.torch.einsum(pattern, *x)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/functional.py", line 407, in einsum
+    return _VF.einsum(equation, operands)  # type: ignore[attr-defined]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 20.00 MiB. GPU 0 has a total capacity of 39.49 GiB of which 17.38 MiB is free. Process 877429 has 39.47 GiB memory in use. Of the allocated memory 38.72 GiB is allocated by PyTorch, and 268.37 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

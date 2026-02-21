@@ -1,0 +1,20 @@
+Traceback (most recent call last):
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 276, in <module>
+    main()
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 217, in main
+    _run_single_iteration(
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 169, in _run_single_iteration
+    optimizer.step()
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/optimizer.py", line 493, in wrapper
+    out = func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/optimizer.py", line 91, in _use_grad
+    ret = func(self, *args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/adamw.py", line 232, in step
+    has_complex = self._init_group(
+                  ^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/adamw.py", line 175, in _init_group
+    state["exp_avg_sq"] = torch.zeros_like(
+                          ^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 100.00 MiB. GPU 0 has a total capacity of 39.49 GiB of which 81.38 MiB is free. Process 882140 has 39.41 GiB memory in use. Of the allocated memory 38.85 GiB is allocated by PyTorch, and 48.55 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

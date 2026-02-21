@@ -1,0 +1,1 @@
+done mode=forward model=2.7b ctx=128 dtype=float32 mixed_precision=True warmup=5 profile_steps=1

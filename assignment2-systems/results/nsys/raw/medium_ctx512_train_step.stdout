@@ -1,0 +1,4 @@
+done mode=train_step model=medium ctx=512 dtype=float32 warmup=5 profile_steps=1
+Generating '/tmp/nsys-report-5722.qdstrm'
+Generated:
+    /workspace/stanford-cs336/assignment2-systems/results/nsys/raw/medium_ctx512_train_step.qdstrm

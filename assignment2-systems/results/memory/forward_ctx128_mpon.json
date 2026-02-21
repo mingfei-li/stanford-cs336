@@ -1,0 +1,12 @@
+{
+  "mode": "forward",
+  "model_size": "2.7b",
+  "context_length": 128,
+  "dtype": "float32",
+  "mixed_precision": true,
+  "mixed_dtype": "bfloat16",
+  "max_memory_allocated_bytes": 23966490624,
+  "max_memory_reserved_bytes": 24213716992,
+  "memory_allocated_bytes": 13644347392,
+  "memory_reserved_bytes": 24213716992
+}

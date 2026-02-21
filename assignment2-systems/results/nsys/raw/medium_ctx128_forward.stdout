@@ -1,0 +1,4 @@
+done mode=forward model=medium ctx=128 dtype=float32 warmup=5 profile_steps=1
+Generating '/tmp/nsys-report-7af2.qdstrm'
+Generated:
+    /workspace/stanford-cs336/assignment2-systems/results/nsys/raw/medium_ctx128_forward.qdstrm

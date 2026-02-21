@@ -1,0 +1,4 @@
+done mode=train_step model=large ctx=256 dtype=float32 warmup=5 profile_steps=1
+Generating '/tmp/nsys-report-6587.qdstrm'
+Generated:
+    /workspace/stanford-cs336/assignment2-systems/results/nsys/raw/large_ctx256_train_step.qdstrm

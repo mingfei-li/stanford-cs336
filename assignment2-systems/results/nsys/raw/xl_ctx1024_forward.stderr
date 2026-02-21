@@ -1,0 +1,41 @@
+Traceback (most recent call last):
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 153, in <module>
+    main()
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 138, in main
+    _run_single_iteration(model, optimizer, x, args.mode, use_nvtx=False)
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/nsys_profile_workload.py", line 82, in _run_single_iteration
+    y = model(x)
+        ^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py", line 285, in forward
+    x = layer(x)
+        ^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py", line 249, in forward
+    x = x + self.attn(self.ln1(x))
+            ^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1739, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1750, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py", line 221, in forward
+    out = scaled_dot_product_attention(q, k, v, mask)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py", line 162, in scaled_dot_product_attention
+    attention_scores = torch.masked_fill(
+                       ^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 400.00 MiB. GPU 0 has a total capacity of 39.49 GiB of which 309.38 MiB is free. Process 770434 has 39.18 GiB memory in use. Of the allocated memory 38.65 GiB is allocated by PyTorch, and 46.34 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Importer error status: The importer binary and its dependencies were not found.
+Unable to retrieve the importer version: skipping importation of the QDSTRM file.

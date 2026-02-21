@@ -1,0 +1,4 @@
+done mode=forward model=xl ctx=128 dtype=float32 warmup=5 profile_steps=1
+Generating '/tmp/nsys-report-3406.qdstrm'
+Generated:
+    /workspace/stanford-cs336/assignment2-systems/results/nsys/raw/xl_ctx128_forward.qdstrm

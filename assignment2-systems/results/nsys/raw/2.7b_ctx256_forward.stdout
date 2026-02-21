@@ -1,0 +1,4 @@
+done mode=forward model=2.7b ctx=256 dtype=float32 warmup=5 profile_steps=1
+Generating '/tmp/nsys-report-e2b1.qdstrm'
+Generated:
+    /workspace/stanford-cs336/assignment2-systems/results/nsys/raw/2.7b_ctx256_forward.qdstrm

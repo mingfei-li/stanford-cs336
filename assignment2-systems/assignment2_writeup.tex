@@ -3,6 +3,7 @@
 \usepackage{booktabs}
 \usepackage{longtable}
 \usepackage{array}
+\usepackage{graphicx}
 \usepackage{hyperref}
 
 \title{CS336 Spring 2025 Assignment 2: Systems\\Writeup}
@@ -58,16 +59,159 @@ xl & 1186.364 & 289.365 & 1077.503 & 31.389 & 1092.626 & 12.791 & 1099.266 & 5.9
 Without warmup (\texttt{w=0}), both average step time and variance are much worse across sizes. Using 1--2 warmup steps substantially improves stability, but can still differ from the 5-step baseline because one-time startup effects (kernel autotuning/selection, allocator behavior, cache setup, lazy initialization) may not be fully amortized yet.
 
 \section{Problem: nsys\_profile}
-\textbf{TODO:} Add results and responses for parts (a)--(e).
+\subsection*{Profiling Coverage}
+We profiled with \texttt{nsys} at context lengths \{128, 256, 512, 1024\} for each model size \{small, medium, large, xl, 2.7b\}, using one profiled step after warmup. As allowed by the handout, several larger configurations ran out of memory and are noted below.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{lcccc}
+\toprule
+Model & 128 & 256 & 512 & 1024 \\
+\midrule
+Forward-only & & & & \\
+small & yes & yes & yes & yes \\
+medium & yes & yes & yes & yes \\
+large & yes & yes & yes & OOM \\
+xl & yes & yes & yes & OOM \\
+2.7b & yes & yes & OOM & OOM \\
+\midrule
+Train step (fwd+bwd+AdamW) & & & & \\
+small & yes & yes & yes & yes \\
+medium & yes & yes & yes & yes \\
+large & yes & yes & yes & OOM \\
+xl & OOM & OOM & OOM & OOM \\
+2.7b & OOM & OOM & OOM & OOM \\
+\bottomrule
+\end{tabular}
+\caption{Nsight coverage; OOM indicates CUDA out-of-memory during warmup/profiled step.}
+\end{table}
+
+\subsection*{(a) Forward-pass time and comparison to Python timers}
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrr}
+\toprule
+Model (ctx=128) & Nsight forward (ms) & Part 1.1.3 forward mean (ms) & Delta (ms) \\
+\midrule
+small & 201.262 & 105.303 & +95.959 \\
+medium & 406.419 & 184.545 & +221.874 \\
+large & 781.562 & 339.047 & +442.515 \\
+xl & 1298.431 & 733.624 & +564.807 \\
+2.7b & 1209.294 & 838.264 & +371.030 \\
+\bottomrule
+\end{tabular}
+\caption{Nsight forward-pass NVTX timing vs. Part (b) Python benchmark timings.}
+\end{table}
+
+The Nsight forward-pass times are substantially higher than the Python benchmark values in this run. This mismatch is expected because Nsight instrumentation introduces overhead and here we profiled single iterations rather than averaging 10 timed steps like in Part (b).
+
+\subsection*{(b) Dominant CUDA kernel and invocation count}
+In the forward pass, the highest cumulative-GPU-time kernel is generally a GEMM kernel (for example, \texttt{ampere\_sgemm\_128x64\_tn} for small/medium/large at context length 128). For small@128 forward, this top kernel was invoked 25 times in one forward pass. The dominant kernel is not always the same once backward is included (e.g., small@128 train-step is dominated by a different GEMM variant), so the answer is configuration-dependent.
+
+Here, a name like \texttt{ampere\_sgemm\_128x64\_tn} denotes an Ampere-optimized single-precision matrix-multiplication kernel; \texttt{128x64} indicates the tile shape, and \texttt{tn} indicates transpose/non-transpose layout choices for the GEMM operands.
+
+\subsection*{(c) Non-matmul kernels with non-trivial runtime}
+Beyond GEMMs, non-trivial forward runtime comes from elementwise and reduction kernels, including direct copy/masked fill/indexing and reduction-style kernels used by normalization and softmax-related computation. These appear consistently in the top non-GEMM entries across model sizes.
+
+\subsection*{(d) Training-step vs inference kernel mix}
+On configurations where both modes fit in memory, matrix-multiplication kernels account for about 80.0\% of CUDA kernel time in forward-only runs versus about 71.4\% in full training steps. So compared to inference, training shifts more time into non-matmul work (backward elementwise/reduction kernels and optimizer multi-tensor update kernels).
+
+\subsection*{(e) Softmax vs matmul within self-attention}
+Using an additional attention-annotated forward profile (medium@128), the summed attention softmax runtime was 48.61 ms, while attention matrix multiplications were 30.31 ms (QK) + 21.94 ms (PV) = 52.25 ms. This runtime gap is much smaller than the FLOP gap (matmuls are far higher FLOPs), consistent with softmax and related steps being more memory-bound and less compute-efficient than GEMMs.
 
 \section{Problem: mixed\_precision\_accumulation}
-\textbf{TODO:} Add mixed-precision accumulation findings.
+\subsection*{(a) Accumulation experiments}
+We evaluated the four accumulation snippets from the prompt and obtained:
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+Case & Final value of \texttt{s} \\
+\midrule
+\texttt{float32} accumulator + \texttt{float32} addend & 10.0001335 \\
+\texttt{float16} accumulator + \texttt{float16} addend & 9.9531250 \\
+\texttt{float32} accumulator + \texttt{float16} addend & 10.0021362 \\
+\texttt{float32} accumulator + cast(\texttt{float16} addend$\rightarrow$\texttt{float32}) & 10.0021362 \\
+\bottomrule
+\end{tabular}
+\caption{Observed outputs from the four mixed-precision accumulation snippets.}
+\end{table}
+
+\subsection*{(b) Why this happens}
+Accumulating directly in FP16 is much less accurate because FP16 has far fewer mantissa bits, so repeated additions incur larger rounding error. Using an FP32 accumulator significantly improves stability, but if each addend is first quantized to FP16 then that quantization error is still present, which is why cases (3) and (4) match each other and remain less accurate than pure FP32 accumulation.
 
 \section{Problem: benchmarking\_mixed\_precision}
-\textbf{TODO:} Add timings and commentary for full vs.\ mixed precision.
+\subsection*{(a) Dtypes under FP16 autocast}
+Assuming model parameters are initialized in FP32 and training is done on CUDA with \texttt{torch.autocast(..., dtype=torch.float16)}:
+\begin{itemize}
+\item Model parameters inside autocast: FP32 (autocast does not permanently cast parameters).
+\item Output of \texttt{ToyModel.fc1}: typically FP16.
+\item Output of \texttt{ToyModel.ln}: typically FP32 (layer norm is on autocast's FP32-safe path).
+\item Model logits (\texttt{ToyModel.fc2} output): typically FP16.
+\item Loss: typically FP32 for common PyTorch loss ops under autocast.
+\item Gradients: FP32 (matching FP32 parameter storage dtype).
+\end{itemize}
+
+\subsection*{(b) Why layer norm is treated differently}
+Layer norm computes per-feature statistics (mean/variance) and involves reductions plus subtract/square/rsqrt operations that are numerically sensitive to precision. FP16 can lose significant accuracy (and may overflow/underflow more easily), so running layer norm in FP32 is safer. BF16 has a wider exponent range than FP16 (so overflow is less problematic), but it still has limited mantissa precision, so FP32 treatment of normalization remains helpful for stability.
+
+\subsection*{(c) FP32 vs BF16 mixed-precision timings}
+\begin{table}[h]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lrrrrrr}
+\toprule
+Model & Fwd FP32 (ms) & Fwd BF16 MP (ms) & Bwd FP32 (ms) & Bwd BF16 MP (ms) & Step FP32 (ms) & Step BF16 MP (ms) \\
+\midrule
+small & 87.552 & 110.179 & 71.047 & 59.873 & 158.618 & 170.065 \\
+medium & 217.868 & 223.842 & 75.005 & 96.604 & 292.888 & 320.462 \\
+large & 384.381 & 363.331 & 163.561 & 134.228 & 547.968 & 497.575 \\
+xl & 781.901 & 514.076 & 323.489 & 180.433 & 1105.413 & 694.529 \\
+2.7b & 841.362 & 352.867 & 456.769 & 129.098 & 1298.162 & 481.981 \\
+\bottomrule
+\end{tabular}
+}
+\caption{Forward/backward/step means with and without BF16 autocast mixed precision (warmup=5, measured=10, ctx=128).}
+\end{table}
+
+Mixed precision showed little or negative benefit for the smallest models in this run, but produced clear speedups for larger models. Step-time speedup grew with scale (about 1.10$\times$ at large, 1.59$\times$ at xl, and 2.69$\times$ at 2.7b), consistent with larger workloads benefiting more from Tensor Core throughput and amortizing autocast overhead.
 
 \section{Problem: memory\_profiling}
-\textbf{TODO:} Add memory timeline images, peak-memory table, and responses for parts (a)--(e).
+\subsection*{(a) Memory-profiler instrumentation and timelines}
+I added memory-profiler support to \texttt{cs336\_systems/nsys\_profile\_workload.py} using \texttt{torch.cuda.memory.\_record\_memory\_history}, \texttt{\_dump\_snapshot}, and peak-memory JSON export. Snapshots were generated under \texttt{results/memory/*.pickle} for successful runs (for example \texttt{forward\_ctx128\_mpoff.pickle} and \texttt{forward\_ctx128\_mpon.pickle}).
+
+From the successful forward profiles, the timeline is consistent with a large rise during the forward region and then a plateau near peak reserved memory after kernel completion. For full train-step runs (forward+backward+optimizer), all 2.7B configurations on this 40GB GPU ran out of memory during optimizer-state allocation, so a complete train-step timeline could not be produced in this environment.
+
+\subsection*{(b) Peak memory by context length}
+\begin{table}[h]
+\centering
+\begin{tabular}{lrr}
+\toprule
+Context length & Forward peak allocated (GiB, FP32) & Full train-step peak (GiB, FP32) \\
+\midrule
+128 & 17.940 & OOM \\
+256 & 24.176 & OOM \\
+512 & OOM & OOM \\
+\bottomrule
+\end{tabular}
+\caption{Peak memory from profiler JSON outputs for the 2.7B model.}
+\end{table}
+
+\subsection*{(c) Mixed-precision peak memory}
+For BF16 autocast mixed precision, forward-pass peak allocated memory was 22.321 GiB (ctx=128), 26.410 GiB (ctx=256), and 36.724 GiB (ctx=512). Full train-step runs with BF16 autocast still OOM at all tested context lengths (128/256/512). In this setup, mixed precision did not significantly reduce memory footprint for the 2.7B model and did not make full train steps fit on a 40GB GPU.
+
+\subsection*{(d) Residual-stream activation size}
+For one residual-stream activation tensor in FP32, size is
+\[
+= \mathrm{batch} \times \mathrm{context} \times d_{\mathrm{model}} \times 4\ \mathrm{bytes}
+\]
+\[
+= 4 \times L \times 2560 \times 4.
+\]
+So this is \(40960L\) bytes, i.e. \(5\) MB at \(L{=}128\), \(10\) MB at \(L{=}256\), and \(20\) MB at \(L{=}512\) (using MB \(=1024^2\) bytes).
+
+\subsection*{(e) Largest allocations at reduced detail}
+Inspecting the saved snapshot data for forward runs shows largest active allocations in large chunks (e.g., up to \(\sim\)100 MB blocks in the allocator snapshot, with frequent 40 MB blocks). The available stack traces in this environment resolve mainly to the CUDA caching allocator internals, so the coarse interpretation is that these largest blocks correspond to persistent model/activation storage managed by the allocator during large forward GEMM-heavy regions.
 
 \section{Problem: pytorch\_attention}
 \textbf{TODO:} Add benchmark table, memory accounting, and discussion.

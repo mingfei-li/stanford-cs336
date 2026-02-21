@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 import json
 import timeit
 
@@ -74,6 +75,17 @@ def parse_args() -> argparse.Namespace:
         help='Device string (e.g. "cuda", "cuda:0", "cpu"). Default: cuda.',
     )
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--mixed-precision",
+        action="store_true",
+        help="Enable autocast mixed precision for forward/loss.",
+    )
+    parser.add_argument(
+        "--mixed-dtype",
+        choices=["float16", "bfloat16"],
+        default="bfloat16",
+        help="Autocast dtype when --mixed-precision is enabled.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
     return parser.parse_args()
 
@@ -87,7 +99,11 @@ def main() -> None:
 
     device = torch.device(args.device)
     dtype = DTYPE_MAP[args.dtype]
+    mixed_dtype = DTYPE_MAP[args.mixed_dtype]
     spec = MODEL_SPECS[args.model_size]
+
+    if args.mixed_precision and device.type != "cuda":
+        raise RuntimeError("Mixed precision autocast is only enabled for CUDA devices in this script.")
 
     model = TransformerLM(
         vocab_size=args.vocab_size,
@@ -110,12 +126,19 @@ def main() -> None:
         dtype=torch.long,
     )
 
+    def autocast_ctx():
+        if args.mixed_precision:
+            return torch.autocast(device_type=device.type, dtype=mixed_dtype)
+        return nullcontext()
+
     # Warmup reduces one-time startup effects (kernel selection, allocator/cache setup).
     for _ in range(args.warmup_steps):
         model.zero_grad(set_to_none=True)
-        y = model(x)
+        with autocast_ctx():
+            y = model(x)
+            if args.mode == "forward_backward":
+                loss = _next_token_loss(y, x)
         if args.mode == "forward_backward":
-            loss = _next_token_loss(y, x)
             loss.backward()
 
     forward_times: list[float] = []
@@ -129,13 +152,15 @@ def main() -> None:
         step_start = timeit.default_timer()
 
         fwd_start = timeit.default_timer()
-        y = model(x)
+        with autocast_ctx():
+            y = model(x)
+            if args.mode == "forward_backward":
+                loss = _next_token_loss(y, x)
         _synchronize(device)
         fwd_end = timeit.default_timer()
         forward_times.append(fwd_end - fwd_start)
 
         if args.mode == "forward_backward":
-            loss = _next_token_loss(y, x)
             bwd_start = timeit.default_timer()
             loss.backward()
             _synchronize(device)
@@ -158,6 +183,8 @@ def main() -> None:
             "warmup_steps": args.warmup_steps,
             "measure_steps": args.measure_steps,
             "mode": args.mode,
+            "mixed_precision": args.mixed_precision,
+            "mixed_dtype": args.mixed_dtype if args.mixed_precision else None,
         },
         "forward": _stats(forward_times),
         "step_total": _stats(total_times),

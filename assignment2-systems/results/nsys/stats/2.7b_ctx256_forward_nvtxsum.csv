@@ -1,0 +1,3 @@
+Time (%),Total Time (ns),Instances,Avg (ns),Med (ns),Min (ns),Max (ns),StdDev (ns),Style,Range
+50.3,1599420801,1,1599420801.0,1599420801.0,1599420801,1599420801,0.0,PushPop,profile_step_0
+49.7,1582116025,1,1582116025.0,1582116025.0,1582116025,1582116025,0.0,PushPop,forward_pass
