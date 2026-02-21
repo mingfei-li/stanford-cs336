@@ -265,7 +265,67 @@ To eliminate this \(L^2\) memory cost, avoid materializing the full attention ma
 Use tiled attention plus recomputation checkpointing so backward does not keep full score/probability matrices in memory.
 
 \section{Problem: torch\_compile}
-\textbf{TODO:} Add compilation benchmarking results and response.
+\subsection*{(a) Compiled vs uncompiled PyTorch attention}
+I extended the attention benchmark script to optionally run \texttt{torch.compile} on the attention function (\texttt{--compile-attention}). Settings match Problem \texttt{pytorch\_attention}: batch size 8, no head dimension, \(d_{\text{model}} \in \{16,32,64,128\}\), \(L \in \{256,1024,4096,8192,16384\}\), 10 warmup steps, 100 measured steps, synchronized timing.
+
+\begin{table}[h]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tabular}{rrrrrrl}
+\toprule
+\(d_{\text{model}}\) & \(L\) & Fwd uncompiled (ms) & Fwd compiled (ms) & Bwd uncompiled (ms) & Bwd compiled (ms) & Status \\
+\midrule
+16 & 256 & 0.291 & 0.185 & 1.118 & 0.524 & ok \\
+16 & 1024 & 0.820 & 0.365 & 1.686 & 1.073 & ok \\
+16 & 4096 & 6.708 & 3.659 & 17.722 & 10.638 & ok \\
+16 & 8192 & 25.385 & 14.570 & 65.899 & 38.358 & ok \\
+16 & 16384 & -- & -- & -- & -- & OOM (both) \\
+32 & 256 & 0.239 & 0.202 & 1.148 & 0.723 & ok \\
+32 & 1024 & 0.588 & 0.497 & 1.564 & 1.213 & ok \\
+32 & 4096 & 7.042 & 4.735 & 18.060 & 11.350 & ok \\
+32 & 8192 & 26.656 & 17.349 & 67.335 & 40.527 & ok \\
+32 & 16384 & -- & -- & -- & -- & OOM (both) \\
+64 & 256 & 0.241 & 0.200 & 1.203 & 0.702 & ok \\
+64 & 1024 & 0.623 & 0.484 & 1.632 & 1.110 & ok \\
+64 & 4096 & 7.591 & 5.317 & 18.695 & 11.957 & ok \\
+64 & 8192 & 28.789 & 19.508 & 69.722 & 42.997 & ok \\
+64 & 16384 & -- & -- & -- & -- & OOM (both) \\
+128 & 256 & 0.243 & 0.213 & 1.124 & 0.644 & ok \\
+128 & 1024 & 0.681 & 0.529 & 1.664 & 1.177 & ok \\
+128 & 4096 & 8.596 & 6.311 & 19.871 & 13.146 & ok \\
+128 & 8192 & 32.905 & 23.594 & 74.290 & 47.812 & ok \\
+128 & 16384 & -- & -- & -- & -- & OOM (both) \\
+\bottomrule
+\end{tabular}
+}
+\caption{Compiled vs uncompiled attention timings (A100 40GB, FP32).}
+\end{table}
+
+Compiled attention was consistently faster on all non-OOM configurations.
+Forward speedups were about \(1.14\times\) to \(2.25\times\), and backward speedups were about \(1.29\times\) to \(2.13\times\). The OOM boundary did not change: both versions failed at \(L=16384\) for all tested \(d_{\text{model}}\).
+
+\subsection*{(b) Compiled vs uncompiled end-to-end Transformer}
+I added \texttt{--compile-model} and \texttt{--include-optimizer-step} to \texttt{cs336\_systems/benchmark.py}, then benchmarked at context length 128, batch size 4, warmup 5, measured 10, comparing vanilla vs compiled model for forward-only and full train step (forward+backward+AdamW step).
+
+\begin{table}[h]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tabular}{lrrrrl}
+\toprule
+Model & Fwd uncompiled (ms) & Fwd compiled (ms) & Train-step uncompiled (ms) & Train-step compiled (ms) & Status \\
+\midrule
+small & 169.652 & 11.464 & 167.638 & 42.937 & ok \\
+medium & 360.032 & 35.021 & 341.366 & 128.684 & ok \\
+large & 679.762 & 72.261 & 625.880 & 284.403 & ok \\
+xl & 1207.474 & 147.182 & OOM & 573.523 & uncompiled train OOM \\
+2.7b & 1101.367 & 231.768 & OOM & OOM & train OOM (both) \\
+\bottomrule
+\end{tabular}
+}
+\caption{End-to-end Transformer benchmark: vanilla vs \texttt{torch.compile} (A100 40GB, FP32).}
+\end{table}
+
+In this environment, compiling the full model produced large forward-pass improvements (about \(4.75\times\) to \(14.8\times\) across sizes). For full train steps including optimizer updates, compiled runs were also faster where both fit (\(\sim 2.2\times\) to \(3.9\times\)). An additional observation is that compiled \texttt{xl} train-step fit while uncompiled \texttt{xl} OOMed at optimizer step initialization; both compiled and uncompiled \texttt{2.7b} train-step OOMed.
 
 \section{Problem: flash\_forward}
 \textbf{TODO:} Add implementation notes and requested deliverables.

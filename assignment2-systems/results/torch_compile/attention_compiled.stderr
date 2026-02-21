@@ -1,0 +1,7 @@
+/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/_inductor/compile_fx.py:194: UserWarning: TensorFloat32 tensor cores for float32 matrix multiplication available but not enabled. Consider setting `torch.set_float32_matmul_precision('high')` for better performance.
+  warnings.warn(
+W0221 06:33:40.990000 89715 torch/_dynamo/convert_frame.py:906] [0/8] torch._dynamo hit config.cache_size_limit (8)
+W0221 06:33:40.990000 89715 torch/_dynamo/convert_frame.py:906] [0/8]    function: 'scaled_dot_product_attention' (/workspace/stanford-cs336/assignment1-basics-main/cs336_basics/model.py:154)
+W0221 06:33:40.990000 89715 torch/_dynamo/convert_frame.py:906] [0/8]    last reason: 0/0: tensor 'L['K']' size mismatch at index 1. expected 256, actual 16384
+W0221 06:33:40.990000 89715 torch/_dynamo/convert_frame.py:906] [0/8] To log all recompilation reasons, use TORCH_LOGS="recompiles".
+W0221 06:33:40.990000 89715 torch/_dynamo/convert_frame.py:906] [0/8] To diagnose recompilation issues, see https://pytorch.org/docs/main/torch.compiler_troubleshooting.html.

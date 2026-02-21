@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/benchmark.py", line 252, in <module>
+    main()
+  File "/workspace/stanford-cs336/assignment2-systems/cs336_systems/benchmark.py", line 157, in main
+    optimizer.step()
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/optimizer.py", line 493, in wrapper
+    out = func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/optimizer.py", line 91, in _use_grad
+    ret = func(self, *args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/adamw.py", line 243, in step
+    adamw(
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/optimizer.py", line 154, in maybe_fallback
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/adamw.py", line 875, in adamw
+    func(
+  File "/workspace/stanford-cs336/assignment2-systems/.venv/lib/python3.11/site-packages/torch/optim/adamw.py", line 699, in _multi_tensor_adamw
+    exp_avg_sq_sqrt = torch._foreach_sqrt(device_exp_avg_sqs)
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 40.00 MiB. GPU 0 has a total capacity of 39.49 GiB of which 33.38 MiB is free. Process 996858 has 39.45 GiB memory in use. Of the allocated memory 37.68 GiB is allocated by PyTorch, and 1.28 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

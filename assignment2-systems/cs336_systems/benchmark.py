@@ -86,6 +86,16 @@ def parse_args() -> argparse.Namespace:
         default="bfloat16",
         help="Autocast dtype when --mixed-precision is enabled.",
     )
+    parser.add_argument(
+        "--compile-model",
+        action="store_true",
+        help="Compile TransformerLM with torch.compile before benchmarking.",
+    )
+    parser.add_argument(
+        "--include-optimizer-step",
+        action="store_true",
+        help="Include AdamW optimizer.step() timing in forward_backward mode.",
+    )
     parser.add_argument("--json", action="store_true", help="Emit machine-readable JSON output.")
     return parser.parse_args()
 
@@ -117,6 +127,9 @@ def main() -> None:
         dtype=dtype,
     )
     model.train()
+    if args.compile_model:
+        model = torch.compile(model)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
     x = torch.randint(
         low=0,
@@ -133,20 +146,23 @@ def main() -> None:
 
     # Warmup reduces one-time startup effects (kernel selection, allocator/cache setup).
     for _ in range(args.warmup_steps):
-        model.zero_grad(set_to_none=True)
+        optimizer.zero_grad(set_to_none=True)
         with autocast_ctx():
             y = model(x)
             if args.mode == "forward_backward":
                 loss = _next_token_loss(y, x)
         if args.mode == "forward_backward":
             loss.backward()
+            if args.include_optimizer_step:
+                optimizer.step()
 
     forward_times: list[float] = []
     backward_times: list[float] = []
+    optimizer_times: list[float] = []
     total_times: list[float] = []
 
     for _ in range(args.measure_steps):
-        model.zero_grad(set_to_none=True)
+        optimizer.zero_grad(set_to_none=True)
 
         _synchronize(device)
         step_start = timeit.default_timer()
@@ -167,6 +183,13 @@ def main() -> None:
             bwd_end = timeit.default_timer()
             backward_times.append(bwd_end - bwd_start)
 
+            if args.include_optimizer_step:
+                opt_start = timeit.default_timer()
+                optimizer.step()
+                _synchronize(device)
+                opt_end = timeit.default_timer()
+                optimizer_times.append(opt_end - opt_start)
+
         _synchronize(device)
         step_end = timeit.default_timer()
         total_times.append(step_end - step_start)
@@ -185,12 +208,16 @@ def main() -> None:
             "mode": args.mode,
             "mixed_precision": args.mixed_precision,
             "mixed_dtype": args.mixed_dtype if args.mixed_precision else None,
+            "compile_model": args.compile_model,
+            "include_optimizer_step": args.include_optimizer_step,
         },
         "forward": _stats(forward_times),
         "step_total": _stats(total_times),
     }
     if backward_times:
         result["backward"] = _stats(backward_times)
+    if optimizer_times:
+        result["optimizer_step"] = _stats(optimizer_times)
 
     if args.json:
         print(json.dumps(result, indent=2))

@@ -1,0 +1,245 @@
+{
+  "config": {
+    "device": "cuda",
+    "batch_size": 8,
+    "d_models": [
+      16,
+      32,
+      64,
+      128
+    ],
+    "seq_lens": [
+      256,
+      1024,
+      4096,
+      8192,
+      16384
+    ],
+    "warmup_steps": 10,
+    "measure_steps": 100,
+    "dtype": "float32",
+    "compile_attention": true
+  },
+  "results": [
+    {
+      "d_model": 16,
+      "seq_len": 256,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.18500300124287605,
+      "forward_std_ms": 0.005334502509237983,
+      "backward_mean_ms": 0.5239916406571865,
+      "backward_std_ms": 0.08514774627288142,
+      "memory_before_backward_bytes": 22315008
+    },
+    {
+      "d_model": 16,
+      "seq_len": 1024,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.36513105034828186,
+      "forward_std_ms": 0.00523550178063046,
+      "backward_mean_ms": 1.0734219662845135,
+      "backward_std_ms": 0.026786111128217712,
+      "memory_before_backward_bytes": 88473600
+    },
+    {
+      "d_model": 16,
+      "seq_len": 4096,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 3.6585484445095062,
+      "forward_std_ms": 0.02142883558195083,
+      "backward_mean_ms": 10.637913793325424,
+      "backward_std_ms": 0.040320283592167,
+      "memory_before_backward_bytes": 1108082688
+    },
+    {
+      "d_model": 16,
+      "seq_len": 8192,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 14.569766540080309,
+      "forward_std_ms": 0.08105902080304504,
+      "backward_mean_ms": 38.35817752406001,
+      "backward_std_ms": 0.230420392508603,
+      "memory_before_backward_bytes": 4346609664
+    },
+    {
+      "d_model": 16,
+      "seq_len": 16384,
+      "status": "oom",
+      "error": "CUDA out of memory. Tried to allocate 8.00 GiB. GPU 0 has a total capacity of 39.49 GiB of which 6.93 GiB is free. Process 985174 has 32.56 GiB memory in use. Of the allocated memory 24.09 GiB is allocated by PyTorch, and 7.97 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "forward_mean_ms": null,
+      "forward_std_ms": null,
+      "backward_mean_ms": null,
+      "backward_std_ms": null,
+      "memory_before_backward_bytes": null
+    },
+    {
+      "d_model": 32,
+      "seq_len": 256,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.2021256648004055,
+      "forward_std_ms": 0.026242090514709798,
+      "backward_mean_ms": 0.7232360169291496,
+      "backward_std_ms": 0.05003279277554839,
+      "memory_before_backward_bytes": 23363584
+    },
+    {
+      "d_model": 32,
+      "seq_len": 1024,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.497348178178072,
+      "forward_std_ms": 0.06344971411561427,
+      "backward_mean_ms": 1.213457491248846,
+      "backward_std_ms": 0.7308508340967991,
+      "memory_before_backward_bytes": 92667904
+    },
+    {
+      "d_model": 32,
+      "seq_len": 4096,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 4.7351509146392345,
+      "forward_std_ms": 0.035765952713801244,
+      "backward_mean_ms": 11.349992509931326,
+      "backward_std_ms": 0.07657457093830881,
+      "memory_before_backward_bytes": 1124859904
+    },
+    {
+      "d_model": 32,
+      "seq_len": 8192,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 17.349000349640846,
+      "forward_std_ms": 0.12142380154345067,
+      "backward_mean_ms": 40.52675174549222,
+      "backward_std_ms": 0.1809435986791801,
+      "memory_before_backward_bytes": 4380164096
+    },
+    {
+      "d_model": 32,
+      "seq_len": 16384,
+      "status": "oom",
+      "error": "CUDA out of memory. Tried to allocate 8.00 GiB. GPU 0 has a total capacity of 39.49 GiB of which 6.90 GiB is free. Process 985174 has 32.59 GiB memory in use. Of the allocated memory 24.11 GiB is allocated by PyTorch, and 7.98 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "forward_mean_ms": null,
+      "forward_std_ms": null,
+      "backward_mean_ms": null,
+      "backward_std_ms": null,
+      "memory_before_backward_bytes": null
+    },
+    {
+      "d_model": 64,
+      "seq_len": 256,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.19969433546066284,
+      "forward_std_ms": 0.006949233956194797,
+      "backward_mean_ms": 0.7018748112022877,
+      "backward_std_ms": 0.10076936659113948,
+      "memory_before_backward_bytes": 25460736
+    },
+    {
+      "d_model": 64,
+      "seq_len": 1024,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.48370981588959694,
+      "forward_std_ms": 0.04723663889050099,
+      "backward_mean_ms": 1.1095111072063446,
+      "backward_std_ms": 0.0246831162308599,
+      "memory_before_backward_bytes": 101056512
+    },
+    {
+      "d_model": 64,
+      "seq_len": 4096,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 5.316615141928196,
+      "forward_std_ms": 0.05970323520245444,
+      "backward_mean_ms": 11.957365460693836,
+      "backward_std_ms": 0.08766216512521935,
+      "memory_before_backward_bytes": 1158414336
+    },
+    {
+      "d_model": 64,
+      "seq_len": 8192,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 19.507888462394476,
+      "forward_std_ms": 0.1459390549849196,
+      "backward_mean_ms": 42.996504344046116,
+      "backward_std_ms": 0.2112092725137027,
+      "memory_before_backward_bytes": 4447272960
+    },
+    {
+      "d_model": 64,
+      "seq_len": 16384,
+      "status": "oom",
+      "error": "CUDA out of memory. Tried to allocate 8.00 GiB. GPU 0 has a total capacity of 39.49 GiB of which 6.85 GiB is free. Process 985174 has 32.63 GiB memory in use. Of the allocated memory 24.20 GiB is allocated by PyTorch, and 7.93 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "forward_mean_ms": null,
+      "forward_std_ms": null,
+      "backward_mean_ms": null,
+      "backward_std_ms": null,
+      "memory_before_backward_bytes": null
+    },
+    {
+      "d_model": 128,
+      "seq_len": 256,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.21256744861602783,
+      "forward_std_ms": 0.022476926477321184,
+      "backward_mean_ms": 0.6444382108747959,
+      "backward_std_ms": 0.048728325856341154,
+      "memory_before_backward_bytes": 29655040
+    },
+    {
+      "d_model": 128,
+      "seq_len": 1024,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 0.5289937742054462,
+      "forward_std_ms": 0.03258260000035217,
+      "backward_mean_ms": 1.177129689604044,
+      "backward_std_ms": 0.023200088398498766,
+      "memory_before_backward_bytes": 117833728
+    },
+    {
+      "d_model": 128,
+      "seq_len": 4096,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 6.311193834990263,
+      "forward_std_ms": 0.05611742780712095,
+      "backward_mean_ms": 13.145683594048023,
+      "backward_std_ms": 0.08237095174869177,
+      "memory_before_backward_bytes": 1225523200
+    },
+    {
+      "d_model": 128,
+      "seq_len": 8192,
+      "status": "ok",
+      "error": null,
+      "forward_mean_ms": 23.593837022781372,
+      "forward_std_ms": 0.09623207618342439,
+      "backward_mean_ms": 47.81180193647742,
+      "backward_std_ms": 0.19343035713173456,
+      "memory_before_backward_bytes": 4581490688
+    },
+    {
+      "d_model": 128,
+      "seq_len": 16384,
+      "status": "oom",
+      "error": "CUDA out of memory. Tried to allocate 8.00 GiB. GPU 0 has a total capacity of 39.49 GiB of which 6.76 GiB is free. Process 985174 has 32.72 GiB memory in use. Of the allocated memory 24.39 GiB is allocated by PyTorch, and 7.84 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)",
+      "forward_mean_ms": null,
+      "forward_std_ms": null,
+      "backward_mean_ms": null,
+      "backward_std_ms": null,
+      "memory_before_backward_bytes": null
+    }
+  ]
+}

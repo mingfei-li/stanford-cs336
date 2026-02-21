@@ -1,0 +1,51 @@
+{
+  "config": {
+    "model_size": "small",
+    "model_spec": {
+      "d_model": 768,
+      "d_ff": 3072,
+      "num_layers": 12,
+      "num_heads": 12
+    },
+    "batch_size": 4,
+    "context_length": 128,
+    "vocab_size": 10000,
+    "dtype": "float32",
+    "device": "cuda",
+    "warmup_steps": 5,
+    "measure_steps": 10,
+    "mode": "forward_backward",
+    "mixed_precision": false,
+    "mixed_dtype": null,
+    "compile_model": true,
+    "include_optimizer_step": true
+  },
+  "forward": {
+    "mean_ms": 11.645793728530407,
+    "std_ms": 0.13326236268589317,
+    "min_ms": 11.5176010876894,
+    "max_ms": 11.890817433595657,
+    "num_steps": 10
+  },
+  "step_total": {
+    "mean_ms": 42.937144823372364,
+    "std_ms": 0.19303134539636688,
+    "min_ms": 42.7189189940691,
+    "max_ms": 43.296825140714645,
+    "num_steps": 10
+  },
+  "backward": {
+    "mean_ms": 22.095598839223385,
+    "std_ms": 0.18011948356487084,
+    "min_ms": 21.844182163476944,
+    "max_ms": 22.4774070084095,
+    "num_steps": 10
+  },
+  "optimizer_step": {
+    "mean_ms": 9.181097708642483,
+    "std_ms": 0.06556115575962698,
+    "min_ms": 9.124178439378738,
+    "max_ms": 9.356897324323654,
+    "num_steps": 10
+  }
+}
