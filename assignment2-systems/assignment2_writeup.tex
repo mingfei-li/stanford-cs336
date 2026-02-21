@@ -21,6 +21,7 @@ Implemented in \texttt{cs336\_systems/benchmark.py}. The script initializes the 
 \subsection*{(b) Forward/backward timings (5 warmup, 10 measured steps)}
 \begin{table}[h]
 \centering
+\resizebox{\textwidth}{!}{
 \begin{tabular}{lrrrrrr}
 \toprule
 Model & Fwd Mean (ms) & Fwd Std (ms) & Bwd Mean (ms) & Bwd Std (ms) & Step Mean (ms) & Step Std (ms) \\
@@ -32,6 +33,7 @@ xl & 733.624 & 42.155 & 313.152 & 1.035 & 1099.266 & 5.916 \\
 2.7b & 838.264 & 9.618 & 457.806 & 1.187 & 1307.808 & 24.517 \\
 \bottomrule
 \end{tabular}
+}
 \caption{Part (b) benchmark results on CUDA (A100 40GB).}
 \end{table}
 
@@ -108,7 +110,7 @@ The Nsight forward-pass times are substantially higher than the Python benchmark
 \subsection*{(b) Dominant CUDA kernel and invocation count}
 In the forward pass, the highest cumulative-GPU-time kernel is generally a GEMM kernel (for example, \texttt{ampere\_sgemm\_128x64\_tn} for small/medium/large at context length 128). For small@128 forward, this top kernel was invoked 25 times in one forward pass. The dominant kernel is not always the same once backward is included (e.g., small@128 train-step is dominated by a different GEMM variant), so the answer is configuration-dependent.
 
-Here, a name like \texttt{ampere\_sgemm\_128x64\_tn} denotes an Ampere-optimized single-precision matrix-multiplication kernel; \texttt{128x64} indicates the tile shape, and \texttt{tn} indicates transpose/non-transpose layout choices for the GEMM operands.
+Here, a kernel name like ``ampere sgemm 128x64 tn'' denotes an Ampere-optimized single-precision matrix-multiplication kernel. The 128x64 part indicates tile shape, and tn indicates transpose/non-transpose layout choices for GEMM operands.
 
 \subsection*{(c) Non-matmul kernels with non-trivial runtime}
 Beyond GEMMs, non-trivial forward runtime comes from elementwise and reduction kernels, including direct copy/masked fill/indexing and reduction-style kernels used by normalization and softmax-related computation. These appear consistently in the top non-GEMM entries across model sizes.
@@ -142,7 +144,7 @@ Accumulating directly in FP16 is much less accurate because FP16 has far fewer m
 
 \section{Problem: benchmarking\_mixed\_precision}
 \subsection*{(a) Dtypes under FP16 autocast}
-Assuming model parameters are initialized in FP32 and training is done on CUDA with \texttt{torch.autocast(..., dtype=torch.float16)}:
+Assuming model parameters are initialized in FP32 and training is done on CUDA with FP16 autocast (for example, \texttt{torch.autocast(...)} configured with \texttt{dtype=torch.float16}):
 \begin{itemize}
 \item Model parameters inside autocast: FP32 (autocast does not permanently cast parameters).
 \item Output of \texttt{ToyModel.fc1}: typically FP16.
@@ -178,7 +180,7 @@ Mixed precision showed little or negative benefit for the smallest models in thi
 
 \section{Problem: memory\_profiling}
 \subsection*{(a) Memory-profiler instrumentation and timelines}
-I added memory-profiler support to \texttt{cs336\_systems/nsys\_profile\_workload.py} using \texttt{torch.cuda.memory.\_record\_memory\_history}, \texttt{\_dump\_snapshot}, and peak-memory JSON export. Snapshots were generated under \texttt{results/memory/*.pickle} for successful runs (for example \texttt{forward\_ctx128\_mpoff.pickle} and \texttt{forward\_ctx128\_mpon.pickle}).
+I added memory-profiler support to the \texttt{nsys\_profile\_workload.py} script using PyTorch CUDA memory history recording and snapshot export, plus peak-memory JSON export. Snapshots were generated under \texttt{results/memory/} for successful runs, including separate files for mixed precision on and off at context length 128.
 
 From the successful forward profiles, the timeline is consistent with a large rise during the forward region and then a plateau near peak reserved memory after kernel completion. For full train-step runs (forward+backward+optimizer), all 2.7B configurations on this 40GB GPU ran out of memory during optimizer-state allocation, so a complete train-step timeline could not be produced in this environment.
 
@@ -214,7 +216,53 @@ So this is \(40960L\) bytes, i.e. \(5\) MB at \(L{=}128\), \(10\) MB at \(L{=}25
 Inspecting the saved snapshot data for forward runs shows largest active allocations in large chunks (e.g., up to \(\sim\)100 MB blocks in the allocator snapshot, with frequent 40 MB blocks). The available stack traces in this environment resolve mainly to the CUDA caching allocator internals, so the coarse interpretation is that these largest blocks correspond to persistent model/activation storage managed by the allocator during large forward GEMM-heavy regions.
 
 \section{Problem: pytorch\_attention}
-\textbf{TODO:} Add benchmark table, memory accounting, and discussion.
+\subsection*{(a) Forward/backward benchmark grid}
+I benchmarked the baseline PyTorch attention implementation with batch size fixed to 8, no head dimension, \(d_{\text{model}} \in \{16, 32, 64, 128\}\), and sequence length \(L \in \{256, 1024, 4096, 8192, 16384\}\). For each configuration, I ran 10 warmup iterations, then timed 100 synchronized forward passes and 100 synchronized backward passes (the backward timer starts right before \texttt{backward()} and excludes setup forward compute). I also recorded allocated CUDA memory right after forward and before backward on the first measured iteration.
+
+\begin{table}[h]
+\centering
+\resizebox{\textwidth}{!}{
+\begin{tabular}{rrrrrll}
+\toprule
+\(d_{\text{model}}\) & \(L\) & Fwd mean (ms) & Bwd mean (ms) & Memory before bwd (GiB) & Status & Note \\
+\midrule
+16 & 256 & 0.291 & 1.118 & 0.021 & ok & -- \\
+16 & 1024 & 0.820 & 1.686 & 0.082 & ok & -- \\
+16 & 4096 & 6.708 & 17.722 & 1.032 & ok & -- \\
+16 & 8192 & 25.385 & 65.899 & 4.048 & ok & -- \\
+16 & 16384 & -- & -- & -- & OOM & CUDA OOM \\
+32 & 256 & 0.239 & 1.148 & 0.022 & ok & -- \\
+32 & 1024 & 0.588 & 1.564 & 0.086 & ok & -- \\
+32 & 4096 & 7.042 & 18.060 & 1.047 & ok & -- \\
+32 & 8192 & 26.656 & 67.335 & 4.079 & ok & -- \\
+32 & 16384 & -- & -- & -- & OOM & CUDA OOM \\
+64 & 256 & 0.241 & 1.203 & 0.024 & ok & -- \\
+64 & 1024 & 0.623 & 1.632 & 0.094 & ok & -- \\
+64 & 4096 & 7.591 & 18.695 & 1.079 & ok & -- \\
+64 & 8192 & 28.789 & 69.722 & 4.141 & ok & -- \\
+64 & 16384 & -- & -- & -- & OOM & CUDA OOM \\
+128 & 256 & 0.243 & 1.124 & 0.028 & ok & -- \\
+128 & 1024 & 0.681 & 1.664 & 0.110 & ok & -- \\
+128 & 4096 & 8.596 & 19.871 & 1.141 & ok & -- \\
+128 & 8192 & 32.905 & 74.290 & 4.267 & ok & -- \\
+128 & 16384 & -- & -- & -- & OOM & CUDA OOM \\
+\bottomrule
+\end{tabular}
+}
+\caption{PyTorch attention benchmark grid (A100 40GB, FP32).}
+\end{table}
+
+The first OOM appears at \(L=16384\) for every tested \(d_{\text{model}}\), which indicates memory is dominated by the \(L^2\) attention-score/probability tensors rather than the \(L \cdot d_{\text{model}}\) projections.
+
+\subsection*{Memory accounting and scaling}
+Using the smallest failing setting (\(B{=}8\), \(L{=}16384\), \(d_{\text{model}}{=}16\), FP32), one \(B \times L \times L\) tensor requires:
+\[
+8 \times 16384 \times 16384 \times 4 = 8{,}589{,}934{,}592\ \text{bytes} \approx 8\ \text{GiB}.
+\]
+Naive attention materializes large \(L \times L\) intermediates (scores/probabilities), and backward needs saved activations plus additional gradient/intermediate buffers, so memory pressure rises quickly. Since these dominant tensors scale as \(O(BL^2)\), saved-for-backward memory grows quadratically with sequence length: doubling \(L\) increases this memory by about \(4\times\). This matches the measured trend from about 1.0--1.1 GiB at \(L{=}4096\) to about 4.0--4.3 GiB at \(L{=}8192\).
+
+To eliminate this \(L^2\) memory cost, avoid materializing the full attention matrix.
+Use tiled attention plus recomputation checkpointing so backward does not keep full score/probability matrices in memory.
 
 \section{Problem: torch\_compile}
 \textbf{TODO:} Add compilation benchmarking results and response.
