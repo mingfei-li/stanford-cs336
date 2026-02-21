@@ -1,0 +1,120 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{hyperref}
+
+\title{CS336 Spring 2025 Assignment 2: Systems\\Writeup}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\tableofcontents
+
+\section{Problem: benchmarking\_script}
+\subsection*{(a) Deliverable}
+Implemented in \texttt{cs336\_systems/benchmark.py}. The script initializes the model from CLI hyperparameters, creates random input data, runs warmup steps, then measures forward-only or forward+backward timing with \texttt{timeit.default\_timer()} and \texttt{torch.cuda.synchronize()}.
+
+\subsection*{(b) Forward/backward timings (5 warmup, 10 measured steps)}
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrrrr}
+\toprule
+Model & Fwd Mean (ms) & Fwd Std (ms) & Bwd Mean (ms) & Bwd Std (ms) & Step Mean (ms) & Step Std (ms) \\
+\midrule
+small & 105.303 & 38.286 & 62.392 & 30.468 & 170.464 & 38.242 \\
+medium & 184.545 & 38.394 & 85.389 & 23.722 & 288.648 & 25.349 \\
+large & 339.047 & 2.485 & 156.582 & 1.572 & 499.472 & 3.688 \\
+xl & 733.624 & 42.155 & 313.152 & 1.035 & 1099.266 & 5.916 \\
+2.7b & 838.264 & 9.618 & 457.806 & 1.187 & 1307.808 & 24.517 \\
+\bottomrule
+\end{tabular}
+\caption{Part (b) benchmark results on CUDA (A100 40GB).}
+\end{table}
+
+Forward and backward time increase with model size. Variability is generally low for larger models in this run (especially backward), while small/medium show higher standard deviation.
+
+\subsection*{(c) Effect of fewer/no warmup steps}
+\begin{table}[h]
+\centering
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & \multicolumn{2}{c}{Warmup 0} & \multicolumn{2}{c}{Warmup 1} & \multicolumn{2}{c}{Warmup 2} & \multicolumn{2}{c}{Warmup 5} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+Model & Mean & Std & Mean & Std & Mean & Std & Mean & Std \\
+\midrule
+small & 225.844 & 138.148 & 169.072 & 36.043 & 176.863 & 30.199 & 170.464 & 38.242 \\
+medium & 344.245 & 181.775 & 294.368 & 34.751 & 295.297 & 25.260 & 288.648 & 25.349 \\
+large & 596.205 & 239.325 & 570.078 & 35.475 & 518.251 & 32.955 & 499.472 & 3.688 \\
+xl & 1186.364 & 289.365 & 1077.503 & 31.389 & 1092.626 & 12.791 & 1099.266 & 5.916 \\
+2.7b & 1402.911 & 225.944 & 1321.353 & 34.838 & 1319.389 & 37.589 & 1307.808 & 24.517 \\
+\bottomrule
+\end{tabular}
+\caption{Part (c): step total timing (ms), 10 measured steps, varying warmup count.}
+\end{table}
+
+Without warmup (\texttt{w=0}), both average step time and variance are much worse across sizes. Using 1--2 warmup steps substantially improves stability, but can still differ from the 5-step baseline because one-time startup effects (kernel autotuning/selection, allocator behavior, cache setup, lazy initialization) may not be fully amortized yet.
+
+\section{Problem: nsys\_profile}
+\textbf{TODO:} Add results and responses for parts (a)--(e).
+
+\section{Problem: mixed\_precision\_accumulation}
+\textbf{TODO:} Add mixed-precision accumulation findings.
+
+\section{Problem: benchmarking\_mixed\_precision}
+\textbf{TODO:} Add timings and commentary for full vs.\ mixed precision.
+
+\section{Problem: memory\_profiling}
+\textbf{TODO:} Add memory timeline images, peak-memory table, and responses for parts (a)--(e).
+
+\section{Problem: pytorch\_attention}
+\textbf{TODO:} Add benchmark table, memory accounting, and discussion.
+
+\section{Problem: torch\_compile}
+\textbf{TODO:} Add compilation benchmarking results and response.
+
+\section{Problem: flash\_forward}
+\textbf{TODO:} Add implementation notes and requested deliverables.
+
+\section{Problem: flash\_backward}
+\textbf{TODO:} Add backward implementation results and validation.
+
+\section{Problem: flash\_benchmarking}
+\textbf{TODO:} Add FlashAttention benchmarking tables and analysis.
+
+\section{Problem: distributed\_communication\_single\_node}
+\textbf{TODO:} Add distributed communication measurements and response.
+
+\section{Problem: naive\_ddp}
+\textbf{TODO:} Add naive DDP implementation deliverable details.
+
+\section{Problem: naive\_ddp\_benchmarking}
+\textbf{TODO:} Add naive DDP benchmarking results and discussion.
+
+\section{Problem: minimal\_ddp\_flat\_benchmarking}
+\textbf{TODO:} Add flat-buffer DDP benchmarking results.
+
+\section{Problem: ddp\_overlap\_individual\_parameters}
+\textbf{TODO:} Add implementation and correctness evidence.
+
+\section{Problem: ddp\_overlap\_individual\_parameters\_benchmarking}
+\textbf{TODO:} Add overlap benchmarking results and conclusions.
+
+\section{Problem: ddp\_overlap\_bucketed}
+\textbf{TODO:} Add bucketed overlap implementation details.
+
+\section{Problem: ddp\_bucketed\_benchmarking}
+\textbf{TODO:} Add bucket-size benchmarking results and analysis.
+
+\section{Problem: communication\_accounting}
+\textbf{TODO:} Add communication-volume accounting calculations.
+
+\section{Problem: optimizer\_state\_sharding}
+\textbf{TODO:} Add implementation details and validation.
+
+\section{Problem: optimizer\_state\_sharding\_accounting}
+\textbf{TODO:} Add memory/speed accounting and ZeRO comparison.
+
+\end{document}
