@@ -1,6 +1,6 @@
 # Stanford CS336: Language Modeling from Scratch Assignment Solutions
 
-My solutions to [Stanford CS336: Language Modeling from Scratch)](https://cs336.stanford.edu/) assignments.
+My solutions to [Stanford CS336: Language Modeling from Scratch](https://cs336.stanford.edu/) assignments.
 
 | Assignment | Algorithms Implemented |
 | ---------- | -------------- |
